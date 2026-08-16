@@ -745,12 +745,7 @@
     function startTimerDirect(id, seconds, callback) {
         clearInterval(timerInterval); let s = parseInt(seconds); document.getElementById(id).innerText = s + 's'; document.getElementById(id).style.color = 'var(--timer)';
         timerInterval = setInterval(() => { s--; document.getElementById(id).innerText = s + 's'; if(s <= 10) document.getElementById(id).style.color = 'var(--danger)'; if(s <= 0) { clearInterval(timerInterval); if(callback) callback(); else alert("⏱️ TEMPO ESGOTADO!"); } }, 1000);
-    }
-    
-    if ('serviceWorker' in navigator) { 
-    window.addEventListener('load', () => { 
-        navigator.serviceWorker.register('sw.js').catch(err => console.log('SW ERRO', err)); 
-    });
+
 </script>
 </body>
 </html>
