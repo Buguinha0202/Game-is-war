@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
     <title>Game is War - Pro Edition</title>
     
-    <!-- Configurações para virar um App de Celular -->
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0b0c10">
     <link rel="apple-touch-icon" href="icon-192.png">
@@ -46,7 +45,6 @@
         .btn-success { background-color: var(--success); } .btn-primary { background-color: var(--primary); }
         .btn-danger { background-color: var(--danger); } .btn-dark { background-color: var(--panel-light); }
 
-        /* Grade 2x2 para melhor visualização */
         .menu-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;}
         .menu-grid .btn { margin-bottom: 0; padding: 20px 10px; font-size: 1.05em; }
 
@@ -155,7 +153,7 @@
         <div id="leaderboard-container" style="flex-grow: 1; overflow-y: auto;"></div>
     </div>
 
-    <!-- TELA DE SETUP DE EQUIPES (Mega Senha, Completa, Nota) -->
+    <!-- SETUP DE EQUIPES -->
     <div id="screen-team-setup" class="screen">
         <div class="header">
             <button class="back-btn" onclick="nav('screen-home')">←</button>
@@ -481,16 +479,19 @@
     function nav(screenId) {
         clearInterval(timerInterval); document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); document.getElementById(screenId).classList.add('active');
     }
+    
+    function generateId() { return 'p_' + Math.random().toString(36).substr(2, 9); } // ID seguro para evitar bugs de conversão no click
+
     function addPlayer() {
         const i = document.getElementById('new-player-name'); const n = i.value.trim();
-        if (n && players.length < 20) { players.push({ id: Date.now(), name: n, score: 0, color: avatarColors[players.length % avatarColors.length] }); i.value = ''; renderPlayers(); renderLeaderboard(); }
+        if (n && players.length < 20) { players.push({ id: generateId(), name: n, score: 0, color: avatarColors[players.length % avatarColors.length] }); i.value = ''; renderPlayers(); renderLeaderboard(); }
     }
     function removePlayer(id) { players = players.filter(p => p.id !== id); renderPlayers(); renderLeaderboard(); }
     function addManualPoints(id) { const p = players.find(x => x.id === id); if(p) { p.score += 10; renderLeaderboard(); } }
 
     function renderPlayers() {
         const c = document.getElementById('player-list-container'); c.innerHTML = '';
-        players.forEach(p => { c.innerHTML += `<div class="player-item"><div class="avatar" style="background-color: ${p.color};">${p.name.charAt(0).toUpperCase()}</div><div class="player-name">${p.name}</div><button class="icon-btn" onclick="removePlayer(${p.id})">🗑️</button></div>`; });
+        players.forEach(p => { c.innerHTML += `<div class="player-item"><div class="avatar" style="background-color: ${p.color};">${p.name.charAt(0).toUpperCase()}</div><div class="player-name">${p.name}</div><button class="icon-btn" onclick="removePlayer('${p.id}')">🗑️</button></div>`; });
         document.querySelectorAll('#config-player-count').forEach(el => el.innerText = players.length);
     }
 
@@ -499,7 +500,7 @@
         if(players.length === 0) return c.innerHTML = '<p style="text-align:center;color:#9ca3af;">Nenhum jogador cadastrado.</p>';
         [...players].sort((a, b) => b.score - a.score).forEach((p, i) => {
             const medal = i===0&&p.score>0?'🥇':i===1&&p.score>0?'🥈':i===2&&p.score>0?'🥉':`${i+1}º`;
-            c.innerHTML += `<div class="player-item"><div style="font-size:1.2em; margin-right:10px; width:30px; text-align:center; color:var(--text-muted); font-weight:900;">${medal}</div><div class="avatar" style="background-color:${p.color}; width:35px; height:35px; font-size:1em;">${p.name.charAt(0).toUpperCase()}</div><div class="player-name">${p.name}</div><div class="player-score">${p.score}</div><button class="add-pts-btn" onclick="addManualPoints(${p.id})">+ 10</button></div>`;
+            c.innerHTML += `<div class="player-item"><div style="font-size:1.2em; margin-right:10px; width:30px; text-align:center; color:var(--text-muted); font-weight:900;">${medal}</div><div class="avatar" style="background-color:${p.color}; width:35px; height:35px; font-size:1em;">${p.name.charAt(0).toUpperCase()}</div><div class="player-name">${p.name}</div><div class="player-score">${p.score}</div><button class="add-pts-btn" onclick="addManualPoints('${p.id}')">+ 10</button></div>`;
         });
     }
 
@@ -627,10 +628,19 @@
             const temaSorteado = selectedThemes[Math.floor(Math.random() * selectedThemes.length)];
             const palavraCivil = puxarPalavra([temaSorteado]); let palavraImp = "Descubra a palavra!";
             if(currentGameActive === 'impostor' && gameMode === 'classico') palavraImp = puxarPalavra([temaSorteado]);
-            currentRoundData.baseWord = palavraCivil; currentRoundData.impostorId = shuf[0].id; currentRoundData.impostorName = shuf[0].name;
+            
+            // Corrige o bug do impostor sempre no index 0
+            const impIdx = Math.floor(Math.random() * shuf.length);
+            currentRoundData.baseWord = palavraCivil; currentRoundData.impostorId = shuf[impIdx].id; currentRoundData.impostorName = shuf[impIdx].name;
+
+            let impTitle = currentGameActive === 'espiao' ? 'Espião' : (gameMode === 'classico' ? 'Sua Palavra' : 'Impostor');
+            let impColor = currentGameActive === 'espiao' ? 'var(--danger)' : (gameMode === 'classico' ? 'var(--text-main)' : 'var(--danger)');
+            let civilTitle = currentGameActive === 'espiao' ? 'O Local' : 'Sua Palavra';
+            let civilColor = currentGameActive === 'espiao' ? 'var(--primary)' : 'var(--text-main)';
+
             shuf.forEach((p, i) => {
-                if(i === 0) currentRoundData.roles.push({ id: p.id, title: currentGameActive==='espiao'?'Espião':'Sua Palavra', word: palavraImp, color: currentGameActive==='espiao'?'var(--danger)':'var(--text-main)' });
-                else currentRoundData.roles.push({ id: p.id, title: currentGameActive==='espiao'?'O Local':'Sua Palavra', word: palavraCivil, color: currentGameActive==='espiao'?'var(--primary)':'var(--text-main)' });
+                if(i === impIdx) currentRoundData.roles.push({ id: p.id, title: impTitle, word: palavraImp, color: impColor });
+                else currentRoundData.roles.push({ id: p.id, title: civilTitle, word: palavraCivil, color: civilColor });
             });
         } 
         else if(currentGameActive === 'duplas') {
@@ -639,7 +649,7 @@
             for(let i=0; i < (conf===5?2:Math.floor(conf/2)); i++) { let p = puxarPalavra(selectedThemes); rolesArr.push(p, p); }
             for(let i=0; i < (conf - rolesArr.length); i++) rolesArr.push("IMPOSTOR");
             rolesArr = rolesArr.sort(() => Math.random() - 0.5);
-            shuf.slice(0, conf).forEach((p, i) => { currentRoundData.roles.push({ id: p.id, title: rolesArr[i]==="IMPOSTOR" ? 'Impostor' : 'Sua Palavra', word: rolesArr[i], color: rolesArr[i]==="IMPOSTOR" ? 'var(--danger)' : 'var(--primary)' }); });
+            shuf.slice(0, conf).forEach((p, i) => { currentRoundData.roles.push({ id: p.id, title: rolesArr[i]==="IMPOSTOR" ? 'Impostor' : 'Sua Palavra', word: rolesArr[i], color: rolesArr[i]==="IMPOSTOR" ? 'var(--danger)' : 'var(--text-main)' }); });
             currentRoundData.playOrder = shuf.slice(0, conf);
         }
         else if(currentGameActive === 'posicao') {
@@ -674,10 +684,10 @@
 
     function startVoting() {
         clearInterval(timerInterval); nav('screen-vote'); const c = document.getElementById('vote-list-container'); c.innerHTML = '';
-        [...players].sort((a,b) => a.name.localeCompare(b.name)).forEach(p => { c.innerHTML += `<button class="btn" style="background: var(--panel-light); margin-bottom: 10px; display: flex; align-items: center; text-align: left;" onclick="processVote(${p.id})"><div class="avatar" style="background-color: ${p.color}; margin-right: 15px; width: 35px; height: 35px; font-size: 1em; margin-bottom:0;">${p.name.charAt(0).toUpperCase()}</div>${p.name}</button>`; });
+        [...players].sort((a,b) => a.name.localeCompare(b.name)).forEach(p => { c.innerHTML += `<button class="btn" style="background: var(--panel-light); margin-bottom: 10px; display: flex; align-items: center; text-align: left;" onclick="processVote('${p.id}')"><div class="avatar" style="background-color: ${p.color}; margin-right: 15px; width: 35px; height: 35px; font-size: 1em; margin-bottom:0;">${p.name.charAt(0).toUpperCase()}</div>${p.name}</button>`; });
     }
     function processVote(votedId) {
-        nav('screen-result'); const isCorrect = votedId === currentRoundData.impostorId;
+        nav('screen-result'); const isCorrect = String(votedId) === String(currentRoundData.impostorId);
         const title = document.getElementById('result-title'); const subtitle = document.getElementById('result-subtitle');
         document.getElementById('result-detail-box').innerHTML = `<div style="background: var(--bg-color); padding: 15px; border-radius: 15px; margin-bottom: 15px;"><div style="color: var(--text-muted); font-size: 0.9em;">Palavra/Local Correto</div><div style="font-size: 1.5em; font-weight: 900; color: white;">${currentRoundData.baseWord}</div></div><div style="background: var(--bg-color); padding: 15px; border-radius: 15px; margin-bottom: 30px;"><div style="color: var(--text-muted); font-size: 0.9em;">Infiltrado</div><div style="font-size: 1.5em; font-weight: 900; color: var(--danger);">${currentRoundData.impostorName}</div></div>`;
         if(isCorrect) { title.innerText = "Infiltrado pego!"; title.style.color = "var(--success)"; subtitle.innerText = "Vitória! Civis ganharam +10 pts cada."; players.forEach(p => { if(p.id !== currentRoundData.impostorId) p.score += 10; }); } 
@@ -688,17 +698,18 @@
     // Jogo da Nota Especial Voto
     function startNotaSequence() {
         let nums = Array.from({length: 10}, (_, i) => i + 1).sort(() => Math.random() - 0.5); currentRoundData = { playOrder: [], roles: [] };
-        teams.forEach((t, i) => { const describer = t.players[0]; currentRoundData.playOrder.push(describer); currentRoundData.roles.push({ id: describer.id, title: `Sua Nota (Equipe ${i+1})`, word: nums[i].toString(), color: 'var(--primary)' }); });
+        currentRoundData.playOrder = [...teams].sort(() => Math.random() - 0.5).map(t => t.players[0]); // Shuffles team turn order
+        teams.forEach((t, i) => { const describer = t.players[0]; currentRoundData.roles.push({ id: describer.id, title: `Sua Nota (Equipe ${t.id+1})`, word: nums[i].toString(), color: 'var(--primary)' }); });
         turnIndex = 0; isRevealed = false; prepareTurnScreen(); nav('screen-reveal');
     }
     function startVotingNota() {
         nav('screen-vote'); document.getElementById('vote-title').innerText = "Fim da Rodada"; document.getElementById('vote-title').style.color = "var(--primary)"; document.getElementById('vote-sub').innerText = "Qual dupla acertou a nota primeiro?";
         const c = document.getElementById('vote-list-container'); c.innerHTML = '';
-        teams.forEach(t => { c.innerHTML += `<button class="btn" style="background: var(--panel-light); margin-bottom: 10px; display: flex; align-items: center; text-align: left;" onclick="processVoteNota(${t.id})"><div style="margin-left:10px;">Equipe ${t.id+1} (${t.players.map(p=>p.name).join(' e ')})</div></button>`; });
+        teams.forEach(t => { c.innerHTML += `<button class="btn" style="background: var(--panel-light); margin-bottom: 10px; display: flex; align-items: center; text-align: left;" onclick="processVoteNota('${t.id}')"><div style="margin-left:10px;">Equipe ${t.id+1} (${t.players.map(p=>p.name).join(' e ')})</div></button>`; });
     }
     function processVoteNota(winTeamId) {
         nav('screen-result'); document.getElementById('result-title').innerText = "Vitória!"; document.getElementById('result-title').style.color = "var(--success)"; document.getElementById('result-subtitle').innerText = "A equipe vencedora ganhou +10 pts cada.";
-        const winTeam = teams.find(t => t.id === winTeamId); winTeam.players.forEach(p => { let gp = players.find(x => x.id === p.id); if(gp) gp.score += 10; });
+        const winTeam = teams.find(t => String(t.id) === String(winTeamId)); winTeam.players.forEach(p => { let gp = players.find(x => x.id === p.id); if(gp) gp.score += 10; });
         document.getElementById('result-detail-box').innerHTML = `<div style="background: var(--bg-color); padding: 15px; border-radius: 15px; margin-bottom: 30px;"><div style="color: var(--text-muted); font-size: 0.9em; margin-bottom:10px;">Vencedores</div><div style="font-size: 1.2em; font-weight: 900; color: var(--success);">${winTeam.players.map(p=>p.name).join(' e ')}</div></div>`;
         renderLeaderboard();
     }
@@ -711,7 +722,7 @@
         const c = document.getElementById('direct-content'); c.innerHTML = ''; nav('screen-direct');
 
         if(gameId === 'sevira') {
-            c.innerHTML = `<select id="tempo-sevira" style="width:100%; margin-bottom:20px; text-align:center;"><option value="10">Desafio: 10 Segundos</option><option value="15">Desafio: 15 Segundos</option><option value="20">Desafio: 20 Segundos</option><option value="30" selected>Desafio: 30 Segundos</option></select><div id="tema-sv-box" style="font-size:2em; font-weight:900; color:var(--primary); margin: 20px 0; text-align:center;">${puxarTemaRapido()}</div><button class="btn btn-success" onclick="startTimerDirect('timer-sv', document.getElementById('tempo-sevira').value, null)">▶️ Iniciar Cronômetro</button><div id="timer-sv" class="time-text" style="color:var(--timer); margin:10px 0;">30s</div><button class="btn btn-primary" style="margin-bottom:20px;" onclick="document.getElementById('tema-sv-box').innerText = puxarTemaRapido()">🔄 Sortear Outro Tema</button>`;
+            c.innerHTML = `<select id="tempo-sevira" style="width:100%; margin-bottom:20px; text-align:center;"><option value="10">Desafio: 10 Segundos</option><option value="15">Desafio: 15 Segundos</option><option value="20">Desafio: 20 Segundos</option><option value="30" selected>Desafio: 30 Segundos</option></select><div id="tema-sv-box" style="font-size:2em; font-weight:900; color:var(--primary); margin: 20px 0; text-align:center;">${puxarTemaRapido()}</div><button class="btn btn-primary" style="margin-bottom:20px;" onclick="document.getElementById('tema-sv-box').innerText = puxarTemaRapido()">🔄 Sortear Outro Tema</button><div id="timer-sv" class="time-text" style="color:var(--timer); margin:10px 0;">30s</div><button class="btn btn-success" onclick="startTimerDirect('timer-sv', document.getElementById('tempo-sevira').value, null)">▶️ Iniciar Cronômetro</button>`;
         }
         else if(gameId === 'stop') {
             c.innerHTML = `<div style="text-align:center; margin: 40px 0; min-height: 200px; display:flex; flex-direction:column; justify-content:center;"><div id="stop-cat" style="font-size: 1.5em; color: var(--text-muted); font-weight:700;">Tema: ???</div><div id="stop-let" style="font-size: 6em; font-weight: 900; color:var(--primary); line-height: 1;">?</div></div><button class="btn btn-success" onclick="sortearStop(event)">▶️ Sortear</button>`;
@@ -736,10 +747,7 @@
         timerInterval = setInterval(() => { s--; document.getElementById(id).innerText = s + 's'; if(s <= 10) document.getElementById(id).style.color = 'var(--danger)'; if(s <= 0) { clearInterval(timerInterval); if(callback) callback(); else alert("⏱️ TEMPO ESGOTADO!"); } }, 1000);
     }
     
-    // PWA Service Worker Registration
-    if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(err => console.log('SW ERRO', err)); });
-    }
+    if ('serviceWorker' in navigator) { window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(err => console.log('SW ERRO', err)); }); }
 </script>
 </body>
 </html>
