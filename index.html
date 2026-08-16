@@ -46,7 +46,8 @@
         .btn-success { background-color: var(--success); } .btn-primary { background-color: var(--primary); }
         .btn-danger { background-color: var(--danger); } .btn-dark { background-color: var(--panel-light); }
 
-        .menu-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 20px;}
+        /* Grade 2x2 para melhor visualização */
+        .menu-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;}
         .menu-grid .btn { margin-bottom: 0; padding: 20px 10px; font-size: 1.05em; }
 
         .player-item { display: flex; align-items: center; background: var(--panel-light); padding: 10px 15px; border-radius: 15px; margin-bottom: 10px; }
@@ -154,7 +155,7 @@
         <div id="leaderboard-container" style="flex-grow: 1; overflow-y: auto;"></div>
     </div>
 
-    <!-- SETUP DE EQUIPES -->
+    <!-- TELA DE SETUP DE EQUIPES (Mega Senha, Completa, Nota) -->
     <div id="screen-team-setup" class="screen">
         <div class="header">
             <button class="back-btn" onclick="nav('screen-home')">←</button>
@@ -300,7 +301,7 @@
         </div>
     </div>
 
-    <!-- TELA TEAM GAME -->
+    <!-- TELA TEAM GAME (Mega Senha / Completa) -->
     <div id="screen-team-game" class="screen">
         <div class="header">
             <button class="back-btn" onclick="nav('screen-team-setup')">←</button>
@@ -311,7 +312,7 @@
         <div id="tg-content" class="game-direct-content"></div>
     </div>
 
-    <!-- JOGOS DIRETOS -->
+    <!-- JOGOS DIRETOS (Stop, Ultimo a Falar) -->
     <div id="screen-direct" class="screen">
         <div class="header">
             <button class="back-btn" onclick="nav('screen-home')">←</button>
@@ -472,7 +473,7 @@
     }
 
     // ==========================================
-    // 3. JOGADORES E LOBBY
+    // 3. JOGADORES, PLACAR & LOBBY
     // ==========================================
     let players = []; let timerInterval; let currentGameActive = '';
     const avatarColors = ['#ef4444', '#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6'];
@@ -502,11 +503,11 @@
         });
     }
 
-    // EQUIPES (Mega Senha / Completa / Nota)
+    // EQUIPES LOGIC
     let teams = []; let bench = []; let selectedSwap = null;
     function openTeamSetup(gameId) {
         currentGameActive = gameId; const reqSize = gameId === 'completa' ? 3 : 2;
-        if(players.length < reqSize * 2) return alert(`Adicione pelo menos ${reqSize*2} jogadores!`);
+        if(players.length < reqSize * 2) { alert(`Adicione pelo menos ${reqSize*2} jogadores!`); return nav('screen-players'); }
         document.getElementById('ts-title').innerText = gameTitles[gameId];
         document.getElementById('team-setup-config-ms').style.display = gameId === 'megasenha' ? 'flex' : 'none'; document.getElementById('team-setup-config-comp').style.display = gameId === 'completa' ? 'flex' : 'none';
         shuffleTeams(reqSize); nav('screen-team-setup');
@@ -545,7 +546,7 @@
     }
 
     // ==========================================
-    // 4. LÓGICA DE JOGOS DE EQUIPES 
+    // 5. JOGOS DE EQUIPE (Mecânicas Específicas)
     // ==========================================
 
     // MEGA SENHA
@@ -591,7 +592,7 @@
     }
 
     // ==========================================
-    // 5. PASS & PLAY (IMPOSTOR, ESPIÃO, DUPLAS)
+    // 6. PASS & PLAY (IMPOSTOR, ESPIÃO, DUPLAS)
     // ==========================================
     let gameMode = 'classico'; let selectedThemes = []; let currentRoundData = {}; let turnIndex = 0; let isRevealed = false;
 
@@ -603,8 +604,8 @@
     function setMode(mode) { gameMode = mode; document.getElementById('mode-classico').classList.remove('selected'); document.getElementById('mode-misterio').classList.remove('selected'); document.getElementById(`mode-${mode}`).classList.add('selected'); }
 
     function openConfig(gameId) {
-        if(players.length < 3 && (gameId==='impostor'||gameId==='espiao'||gameId==='posicao')) return alert('Adicione pelo menos 3 jogadores primeiro!');
-        if(players.length < 5 && gameId==='duplas') return alert('O Jogo da Dupla precisa de pelo menos 5 jogadores!');
+        if(players.length < 3 && (gameId==='impostor'||gameId==='espiao'||gameId==='posicao')) { alert('Adicione pelo menos 3 jogadores primeiro!'); return nav('screen-players'); }
+        if(players.length < 5 && gameId==='duplas') { alert('O Jogo da Dupla precisa de pelo menos 5 jogadores!'); return nav('screen-players'); }
         currentGameActive = gameId; document.getElementById('config-title').innerText = gameTitles[gameId];
         document.getElementById('config-section-mode').style.display = 'none'; document.getElementById('config-section-timer').style.display = 'none'; document.getElementById('config-section-duplas').style.display = 'none'; document.getElementById('config-section-themes').style.display = 'none';
         selectedThemes = []; renderThemesCheckboxes();
@@ -618,7 +619,7 @@
     function hideWord(e) { if(e.type === 'touchend' || e.type === 'touchcancel') e.preventDefault(); document.getElementById('role-title').style.display = 'none'; document.getElementById('secret-text').style.display = 'none'; document.getElementById('instruction-text').style.display = 'block'; document.getElementById('btn-hold').innerText = 'PRESSIONE E SEGURE'; document.getElementById('btn-hold').style.background = 'var(--panel-light)'; if(isRevealed) document.getElementById('btn-next-player').style.display = 'block'; }
 
     function startPassGame() {
-        if(currentGameActive === 'duplas') { const conf = parseInt(document.getElementById('config-duplas-setup').value); if (players.length < conf) return alert(`Você precisa de pelo menos ${conf} jogadores para esta configuração!`); }
+        if(currentGameActive === 'duplas') { const conf = parseInt(document.getElementById('config-duplas-setup').value); if (players.length < conf) { alert(`Você precisa de pelo menos ${conf} jogadores para esta configuração!`); return nav('screen-players'); } }
         const shuf = [...players].sort(() => Math.random() - 0.5); currentRoundData = { playOrder: shuf, roles: [] };
 
         if(currentGameActive === 'impostor' || currentGameActive === 'espiao') {
@@ -628,8 +629,8 @@
             if(currentGameActive === 'impostor' && gameMode === 'classico') palavraImp = puxarPalavra([temaSorteado]);
             currentRoundData.baseWord = palavraCivil; currentRoundData.impostorId = shuf[0].id; currentRoundData.impostorName = shuf[0].name;
             shuf.forEach((p, i) => {
-                if(i === 0) currentRoundData.roles.push({ id: p.id, title: currentGameActive==='espiao'?'Espião':'Sua Palavra', word: palavraImp, color: currentGameActive==='espiao'?'var(--danger)':'var(--primary)' });
-                else currentRoundData.roles.push({ id: p.id, title: currentGameActive==='espiao'?'O Local':'Sua Palavra', word: palavraCivil, color: 'var(--primary)' });
+                if(i === 0) currentRoundData.roles.push({ id: p.id, title: currentGameActive==='espiao'?'Espião':'Sua Palavra', word: palavraImp, color: currentGameActive==='espiao'?'var(--danger)':'var(--text-main)' });
+                else currentRoundData.roles.push({ id: p.id, title: currentGameActive==='espiao'?'O Local':'Sua Palavra', word: palavraCivil, color: currentGameActive==='espiao'?'var(--primary)':'var(--text-main)' });
             });
         } 
         else if(currentGameActive === 'duplas') {
@@ -652,13 +653,14 @@
         if(turnIndex < currentRoundData.playOrder.length) {
             const p = currentRoundData.playOrder[turnIndex]; const roleData = currentRoundData.roles.find(r => r.id === p.id);
             document.getElementById('turn-player-name').innerText = p.name; document.getElementById('turn-player-name').style.color = p.color;
-            if (currentGameActive === 'impostor' && gameMode === 'classico') { document.getElementById('role-title').innerText = "Sua Palavra"; document.getElementById('role-title').style.color = "var(--text-main)"; } 
-            else { document.getElementById('role-title').innerText = roleData.title; document.getElementById('role-title').style.color = roleData.color; }
-            document.getElementById('secret-text').innerText = roleData.word; document.getElementById('role-title').style.display = 'none'; document.getElementById('secret-text').style.display = 'none';
-            document.getElementById('instruction-text').style.display = 'block'; document.getElementById('btn-next-player').style.display = 'none'; document.getElementById('btn-hold').innerText = 'PRESSIONE E SEGURE'; isRevealed = false;
+            document.getElementById('role-title').innerText = roleData.title; document.getElementById('role-title').style.color = roleData.color;
+            document.getElementById('secret-text').innerText = roleData.word;
+            document.getElementById('role-title').style.display = 'none'; document.getElementById('secret-text').style.display = 'none';
+            document.getElementById('instruction-text').style.display = 'block'; document.getElementById('btn-next-player').style.display = 'none';
+            document.getElementById('btn-hold').innerText = 'PRESSIONE E SEGURE'; isRevealed = false;
         } else {
             if(currentGameActive === 'impostor' || currentGameActive === 'espiao') startDiscussionPhase();
-            else { alert("Sorteio concluído! O jogo já pode começar."); nav('screen-home'); }
+            else { alert("Sorteio concluído! O jogo já pode começar verbalmente."); nav('screen-home'); }
         }
     }
     function nextTurn() { turnIndex++; prepareTurnScreen(); }
@@ -683,9 +685,7 @@
         renderLeaderboard();
     }
 
-    // ==========================================
-    // 6. JOGO DA NOTA (ESPECIAL)
-    // ==========================================
+    // Jogo da Nota Especial Voto
     function startNotaSequence() {
         let nums = Array.from({length: 10}, (_, i) => i + 1).sort(() => Math.random() - 0.5); currentRoundData = { playOrder: [], roles: [] };
         teams.forEach((t, i) => { const describer = t.players[0]; currentRoundData.playOrder.push(describer); currentRoundData.roles.push({ id: describer.id, title: `Sua Nota (Equipe ${i+1})`, word: nums[i].toString(), color: 'var(--primary)' }); });
@@ -704,14 +704,14 @@
     }
 
     // ==========================================
-    // 7. JOGOS DIRETOS (Stop, Ultimo, Se Vira)
+    // 7. JOGOS DIRETOS DA TELA INICIAL
     // ==========================================
     function launchDirect(gameId) {
         currentGameActive = gameId; document.getElementById('direct-title').innerText = gameTitles[gameId];
         const c = document.getElementById('direct-content'); c.innerHTML = ''; nav('screen-direct');
 
         if(gameId === 'sevira') {
-            c.innerHTML = `<select id="tempo-sevira" style="width:100%; margin-bottom:20px; text-align:center;"><option value="10">Desafio: 10 Segundos</option><option value="15">Desafio: 15 Segundos</option><option value="20">Desafio: 20 Segundos</option><option value="30" selected>Desafio: 30 Segundos</option></select><div id="tema-sv-box" style="font-size:2em; font-weight:900; color:var(--primary); margin: 20px 0; text-align:center;">${puxarTemaRapido()}</div><button class="btn btn-primary" style="margin-bottom:20px;" onclick="document.getElementById('tema-sv-box').innerText = puxarTemaRapido()">🔄 Sortear Outro Tema</button><div id="timer-sv" class="time-text" style="color:var(--timer); margin:10px 0;">30s</div><button class="btn btn-success" onclick="startTimerDirect('timer-sv', document.getElementById('tempo-sevira').value, null)">▶️ Iniciar Cronômetro</button>`;
+            c.innerHTML = `<select id="tempo-sevira" style="width:100%; margin-bottom:20px; text-align:center;"><option value="10">Desafio: 10 Segundos</option><option value="15">Desafio: 15 Segundos</option><option value="20">Desafio: 20 Segundos</option><option value="30" selected>Desafio: 30 Segundos</option></select><div id="tema-sv-box" style="font-size:2em; font-weight:900; color:var(--primary); margin: 20px 0; text-align:center;">${puxarTemaRapido()}</div><button class="btn btn-success" onclick="startTimerDirect('timer-sv', document.getElementById('tempo-sevira').value, null)">▶️ Iniciar Cronômetro</button><div id="timer-sv" class="time-text" style="color:var(--timer); margin:10px 0;">30s</div><button class="btn btn-primary" style="margin-bottom:20px;" onclick="document.getElementById('tema-sv-box').innerText = puxarTemaRapido()">🔄 Sortear Outro Tema</button>`;
         }
         else if(gameId === 'stop') {
             c.innerHTML = `<div style="text-align:center; margin: 40px 0; min-height: 200px; display:flex; flex-direction:column; justify-content:center;"><div id="stop-cat" style="font-size: 1.5em; color: var(--text-muted); font-weight:700;">Tema: ???</div><div id="stop-let" style="font-size: 6em; font-weight: 900; color:var(--primary); line-height: 1;">?</div></div><button class="btn btn-success" onclick="sortearStop(event)">▶️ Sortear</button>`;
@@ -738,9 +738,7 @@
     
     // PWA Service Worker Registration
     if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-            navigator.serviceWorker.register('sw.js').then(() => console.log('Pronto para rodar Offline.')).catch(err => console.log('Erro no SW', err));
-        });
+        window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(err => console.log('SW ERRO', err)); });
     }
 </script>
 </body>
