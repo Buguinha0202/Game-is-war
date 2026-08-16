@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gameiswar-v1';
+const CACHE_NAME = 'gameiswar-v2';
 const urlsToCache = [
   './',
   './index.html',
