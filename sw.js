@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gameiswar-v2';
+const CACHE_NAME = 'gameiswar-v2'; // Mude esse número sempre que atualizar o site!
 const urlsToCache = [
   './',
   './index.html',
