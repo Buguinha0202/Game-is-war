@@ -1,0 +1,193 @@
+/* ==========================================================
+   JUICE LAYER - Nível 1 (carregar DEPOIS de style.css)
+   Consumido por js/services/juice-manager.js
+   ========================================================== */
+
+/* ---------- Canvas overlay (estilhaços / confete de fallback) ---------- */
+.juice-canvas {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    pointer-events: none;
+    z-index: 9998;
+    contain: strict;
+}
+
+/* ---------- Flash overlay (#flash-overlay já existe no index.html) ---------- */
+.flash-overlay {
+    position: fixed;
+    inset: 0;
+    background-color: #ffffff;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 9997;
+}
+
+@media (min-width: 501px) {
+    .flash-overlay, .glass-crack-overlay {
+        left: 0;
+        right: 0;
+        margin: 0 auto;
+        width: 100%;
+        max-width: 480px;
+    }
+}
+
+/* ---------- Glass crack overlay (#glass-crack já existe no index.html) ---------- */
+.glass-crack-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 9996;
+    opacity: 0;
+    background:
+        repeating-conic-gradient(from 12deg at 50% 42%,
+            rgba(255, 255, 255, 0) 0deg 7deg,
+            rgba(255, 255, 255, 0.65) 7deg 7.5deg,
+            rgba(255, 255, 255, 0) 7.5deg 19deg),
+        repeating-conic-gradient(from 40deg at 50% 42%,
+            rgba(180, 225, 255, 0) 0deg 23deg,
+            rgba(180, 225, 255, 0.35) 23deg 23.4deg,
+            rgba(180, 225, 255, 0) 23.4deg 41deg),
+        radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0) 45%);
+    -webkit-mask-image: radial-gradient(circle at 50% 42%, #000 0, #000 55%, transparent 90%);
+    mask-image: radial-gradient(circle at 50% 42%, #000 0, #000 55%, transparent 90%);
+    filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.6));
+}
+
+.glass-crack-overlay.is-visible {
+    animation: juice-crack-in 0.14s cubic-bezier(0.1, 0.9, 0.3, 1) both;
+}
+
+.glass-crack-overlay.is-fading {
+    opacity: 0;
+    animation: none;
+    transition: opacity 0.7s ease-out;
+}
+
+@keyframes juice-crack-in {
+    0%   { opacity: 0; transform: scale(1.18); }
+    100% { opacity: 1; transform: scale(1); }
+}
+
+/* ---------- Hitstop: congela animações CSS durante o micro-freeze ---------- */
+html.juice-hitstop *,
+html.juice-hitstop *::before,
+html.juice-hitstop *::after {
+    animation-play-state: paused !important;
+    transition: none !important;
+}
+
+/* ---------- Pulse (fallback quando o GSAP não está disponível) ---------- */
+.juice-pulse {
+    animation: juice-pulse 0.24s ease-out;
+}
+
+@keyframes juice-pulse {
+    0%   { transform: scale(1); }
+    50%  { transform: scale(1.1); }
+    100% { transform: scale(1); }
+}
+
+/* ---------- Elevação 3D das cartas (.player-card) ---------- */
+.player-card {
+    --tilt-x: 0deg;
+    --tilt-y: 0deg;
+    --lift: 0px;
+    --lift-scale: 1;
+    --shadow-x: 0px;
+    --shadow-y: 3px;
+    --shadow-blur: 8px;
+    --shadow-alpha: 0.18;
+    --glare-x: 50%;
+    --glare-y: 30%;
+    --glare-alpha: 0;
+
+    transform: perspective(700px) translateY(var(--lift)) rotateX(var(--tilt-x)) rotateY(var(--tilt-y)) scale(var(--lift-scale));
+    box-shadow: var(--shadow-x) var(--shadow-y) var(--shadow-blur) rgba(0, 0, 0, var(--shadow-alpha));
+    /* Retorno com overshoot: efeito de mola ao soltar */
+    transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.5s ease-out;
+    will-change: transform;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.player-card.is-lifted {
+    --lift: -14px;
+    --lift-scale: 1.08;
+    --shadow-y: 22px;
+    --shadow-blur: 26px;
+    --shadow-alpha: 0.45;
+    --glare-alpha: 0.35;
+
+    z-index: 30;
+    /* Durante o toque/arraste a resposta é quase instantânea */
+    transition: transform 0.09s linear, box-shadow 0.09s linear;
+}
+
+/* Brilho especular que acompanha o dedo */
+.player-card::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    z-index: 11;
+    opacity: var(--glare-alpha);
+    background: radial-gradient(circle at var(--glare-x) var(--glare-y), rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0) 55%);
+    transition: opacity 0.25s ease-out;
+}
+
+/* ---------- Acessibilidade ---------- */
+@media (prefers-reduced-motion: reduce) {
+    .player-card,
+    .player-card.is-lifted {
+        transform: none;
+        transition: box-shadow 0.2s ease-out;
+    }
+    .player-card::after { display: none; }
+    .glass-crack-overlay.is-visible { animation: none; opacity: 1; }
+    .juice-pulse { animation: none; }
+}
+
+/* ---------- Touch Ripple Feedback ---------- */
+.touch-ripple-circle {
+    position: fixed;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 2px solid var(--pop-yellow);
+    background: rgba(255, 230, 0, 0.22);
+    pointer-events: none;
+    z-index: 99999;
+    transform: scale(0.3);
+    opacity: 0.95;
+    animation: touchRippleAnim 0.32s ease-out forwards;
+}
+
+@keyframes touchRippleAnim {
+    0%   { transform: scale(0.3); opacity: 0.95; }
+    100% { transform: scale(1.6); opacity: 0; }
+}
+
+/* ---------- Floating Score Mutation Toast ---------- */
+.score-float-toast {
+    position: fixed;
+    font-family: 'Rubik', sans-serif;
+    font-size: 1.2em;
+    font-weight: 900;
+    color: var(--pop-green);
+    text-shadow: 2px 2px 0 var(--ink-black);
+    pointer-events: none;
+    z-index: 99999;
+    animation: floatUpFade 0.75s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes floatUpFade {
+    0%   { transform: translateY(0) scale(0.8); opacity: 0; }
+    25%  { transform: translateY(-12px) scale(1.2); opacity: 1; }
+    100% { transform: translateY(-45px) scale(1); opacity: 0; }
+}
