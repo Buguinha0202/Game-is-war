@@ -147,6 +147,7 @@ window.GIW.ResourceSandbox = ResourceSandbox;
 // 3. GAME STORE COM LOCALSTORAGE & MARIO KART
 // ==========================================
 const STORAGE_KEY = 'GIW_STATE_V3';
+let prendaTimerId = null;
 
 class GameStore {
     players = [];
@@ -154,18 +155,30 @@ class GameStore {
     bench = [];
     currentGameActive = '';
     currentEvent = null;
-    isBetting = false;
     isMarioKart = false;
     isEvents = true;
     isChaos = false;
-    isRoles = true;
+    isRoles = false;
     isSoundOn = true;
     isVibOn = true;
     tourneyTarget = 100;
+    tourneyType = 'rounds';
+    tourneyMaxRounds = 5;
+    tourneyCurrentRound = 0;
+    tourneyCuratedMode = 'balanced';
     tourneyPool = [];
     tourneyAllowedGames = [];
     tournamentMode = false;
+    sessionRounds = 0;
     gameConfigs = { time: 60, sensibilidade: 25, modes: 'classico', themes: [] };
+
+    isTourneyOver() {
+        if (!this.tournamentMode) return false;
+        if (this.tourneyType === 'rounds') {
+            return this.tourneyCurrentRound >= this.tourneyMaxRounds;
+        }
+        return this.players.some(p => (p.score || 0) >= this.tourneyTarget);
+    }
 
     constructor() {
         this.load();
@@ -181,7 +194,8 @@ class GameStore {
                 isRoles: this.isRoles,
                 isSoundOn: this.isSoundOn,
                 isVibOn: this.isVibOn,
-                tourneyTarget: this.tourneyTarget
+                tourneyTarget: this.tourneyTarget,
+                sessionRounds: this.sessionRounds
             };
             localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
         } catch (_) {}
@@ -200,6 +214,7 @@ class GameStore {
                 if (typeof d.isSoundOn === 'boolean') this.isSoundOn = d.isSoundOn;
                 if (typeof d.isVibOn === 'boolean') this.isVibOn = d.isVibOn;
                 if (d.tourneyTarget) this.tourneyTarget = Number(d.tourneyTarget) || 100;
+                if (typeof d.sessionRounds === 'number') this.sessionRounds = d.sessionRounds;
             }
         } catch (_) {}
     }
@@ -245,7 +260,7 @@ class GameStore {
     }
 
     applyGameResult(resultPayload) {
-        let globalMult = (this.currentEvent !== null || this.isBetting) ? 2 : 1;
+        let globalMult = (this.currentEvent !== null) ? 2 : 1;
         const mutations = resultPayload.scoreMutations || [];
         let punishedPlayer = null;
 
@@ -306,31 +321,27 @@ class GameStore {
             });
         }
 
-        if (this.isBetting && Array.isArray(resultPayload.losers)) {
-            resultPayload.losers.forEach(id => {
-                const lp = this.players.find(x => x.id === id);
-                if (lp) {
-                    lp.score = Math.max(0, lp.score - 10);
-                    if (!punishedPlayer) punishedPlayer = lp;
-                }
-            });
-        }
-
-        // Reseta Aposta de Sangue para a próxima rodada
-        this.isBetting = false;
-        const btnAposta = document.getElementById('btn-lobby-aposta');
-        if (btnAposta) {
-            btnAposta.innerText = '🎲 Aposta de Sangue (Desligada)';
-            btnAposta.style.color = 'var(--pop-cyan)';
-        }
-
         this.save();
+        if (this.tournamentMode) {
+            this.tourneyCurrentRound++;
+        }
+        this.sessionRounds = (this.sessionRounds || 0) + 1;
         this.updateStreakBadge();
         window.renderPlayers();
         bus.emit('state:updated');
 
         if (punishedPlayer) {
-            setTimeout(() => appCore.dispararPrenda(punishedPlayer), 1200);
+            if (prendaTimerId) {
+                clearTimeout(prendaTimerId);
+                prendaTimerId = null;
+            }
+            prendaTimerId = setTimeout(() => {
+                prendaTimerId = null;
+                const activeScreen = document.querySelector('.screen.active');
+                if (activeScreen && activeScreen.id === 'screen-result') {
+                    appCore.dispararPrenda(punishedPlayer);
+                }
+            }, 1200);
         }
     }
 }
@@ -369,7 +380,6 @@ window.GIW.state = {
                 bench: store.bench,
                 currentGameActive: store.currentGameActive,
                 currentEvent: store.currentEvent,
-                isBetting: store.isBetting,
                 isMarioKart: store.isMarioKart,
                 isChaos: store.isChaos,
                 isRoles: store.isRoles,
@@ -402,10 +412,13 @@ class AudioEngine {
     #filter = null;
     #compressor = null;
     #noiseBuffer = null;
+    #tensionState = { lastTick: 0 };
 
     constructor() {
         bus.on('audio:play', p => this.#playSfx(p));
         bus.on('audio:filter', p => this.#setFilter(p));
+        bus.on('audio:tension', p => this.#handleTension(p));
+        bus.on('audio:tension_stop', () => this.#stopTension());
 
         const unlock = () => {
             this.#initCtx();
@@ -414,9 +427,38 @@ class AudioEngine {
         ['click', 'touchstart', 'pointerdown'].forEach(ev => document.addEventListener(ev, unlock, { once: true, passive: true }));
     }
 
+    #handleTension({ remainingSec }) {
+        if (!store.isSoundOn || remainingSec > 10 || remainingSec <= 0) return;
+        const now = performance.now();
+        const factor = Math.max(0.08, remainingSec / 10);
+        const interval = 160 + (factor * 940); // 235ms até 1100ms
+        
+        if (now - this.#tensionState.lastTick >= interval) {
+            this.#tensionState.lastTick = now;
+            const pitch = 65 + ((1 - factor) * 45); // 65Hz a 110Hz
+            // Lub-dub cardíaco procedural
+            this.#tone({ type: 'sine', freq: pitch, fEnd: pitch - 28, dur: 0.11, vol: 0.75 + (1 - factor) * 0.25 });
+            setTimeout(() => {
+                this.#tone({ type: 'sine', freq: pitch * 0.85, fEnd: (pitch * 0.85) - 22, dur: 0.09, vol: 0.55 + (1 - factor) * 0.25 });
+            }, 80);
+            
+            // Vibração tátil em rampa acelerada
+            if (store.isVibOn && typeof navigator !== 'undefined' && navigator.vibrate) {
+                const vibDur = Math.round(25 + ((1 - factor) * 45));
+                try { navigator.vibrate([vibDur, 35, Math.round(vibDur * 0.6)]); } catch (_) {}
+            }
+        }
+    }
+
+    #stopTension() {
+        this.#tensionState.lastTick = 0;
+    }
+
     #initCtx() {
         if (this.#ctx) {
-            if (this.#ctx.state === 'suspended') this.#ctx.resume();
+            if (this.#ctx.state === 'suspended') {
+                this.#ctx.resume().catch(() => {});
+            }
             return this.#ctx;
         }
         if (!store.isSoundOn) return null;
@@ -472,6 +514,15 @@ class AudioEngine {
         g.gain.exponentialRampToValueAtTime(0.001, t + dur);
         osc.connect(g);
         g.connect(this.#master);
+
+        // Desconexão explícita para evitar vazamento de memória no grafo Web Audio
+        osc.onended = () => {
+            try {
+                osc.disconnect();
+                g.disconnect();
+            } catch (_) {}
+        };
+
         osc.start(t);
         osc.stop(t + dur + 0.05);
     }
@@ -497,6 +548,16 @@ class AudioEngine {
         src.connect(flt);
         flt.connect(g);
         g.connect(this.#master);
+
+        // Desconexão explícita para evitar vazamento de nós de ruído
+        src.onended = () => {
+            try {
+                src.disconnect();
+                flt.disconnect();
+                g.disconnect();
+            } catch (_) {}
+        };
+
         src.start(c.currentTime);
         src.stop(c.currentTime + dur);
     }
@@ -540,6 +601,14 @@ class AudioEngine {
                 break;
             case 'whoosh':
                 this.#noise({ dur: 0.16, vol: 0.22, f0: 1200, f1: 300 });
+                break;
+            case 'card_lift':
+                this.#tone({ type: 'sine', freq: 360, fEnd: 740, dur: 0.1, vol: 0.28 });
+                this.#noise({ dur: 0.08, vol: 0.1, f0: 900, f1: 300 });
+                break;
+            case 'card_snap':
+                this.#tone({ type: 'triangle', freq: 240, fEnd: 80, dur: 0.07, vol: 0.3 });
+                this.#noise({ dur: 0.05, vol: 0.12, f0: 600, f1: 120 });
                 break;
             case 'beep':
                 this.#tone({ type: 'sine', freq: highTone ? 1200 : 800, dur: 0.1, vol: 0.7 });
@@ -680,7 +749,7 @@ window.gameCatalog = [
     { id: 'quemsoueu', title: 'Quem Sou Eu', icon: '🤔', catName: 'Sintonia Mental', catKey: 'mind', min: 4, badge: 'Celular na Mesa', hook: 'Celular deitado na mesa! Corrida frenética entre duplas respondendo apenas entre si!' },
 
     { id: 'megasenha', title: 'Mega Senha', icon: '🗣️', catName: 'Competição de Equipes', catKey: 'team', min: 4, badge: '1 Palavra por Dica', hook: 'Duelo de 5 senhas: dê 1 palavra por vez até sua equipe acertar primeiro!' },
-    { id: 'completa', title: 'Completa', icon: '🧩', catName: 'Competição de Equipes', catKey: 'team', min: 3, badge: 'Speedrun de 40s', hook: '2 dadores de dica alternam palavras, gritam COMPLETA e o 3º responde em 40s!' },
+    { id: 'completa', title: 'Completa', icon: '🧩', catName: 'Competição de Equipes', catKey: 'team', min: 3, badge: 'Speedrun de 40s', hook: 'Dois jogadores alternam palavras, gritam COMPLETA e o parceiro responde em 40s!' },
     { id: 'mimica', title: 'Mímica', icon: '🤹', catName: 'Competição de Equipes', catKey: 'team', min: 2, badge: 'Ação Sem Sons', hook: 'Escolha a dificuldade da carta (Fácil, Média, Difícil) e atue sem emitir sons!' },
 
     { id: 'stop', title: 'Stop de Roda', icon: '🛑', catName: 'Roda de Adrenalina', catKey: 'adrenaline', min: 2, badge: 'Letra Rápida', hook: 'O tempo diminui a cada palavra falada! Quem travar é eliminado da roda!' },
@@ -690,110 +759,56 @@ window.gameCatalog = [
     { id: 'ultimo', title: 'Último a Falar', icon: '☠️', catName: 'Roda de Adrenalina', catKey: 'adrenaline', min: 2, badge: 'Eliminação Súbita', hook: 'Contagem 3, 2, 1... Tema surpresa na tela! Quem falar por último é eliminado!' }
 ];
 
-appCore.showcaseIdx = 0;
+appCore.currentHomeFilter = 'all';
 
-appCore.renderShowcaseCard = function(animateDir = 0) {
-    const list = window.gameCatalog;
-    if (!list || !list.length) return;
-    
-    if (appCore.showcaseIdx < 0) appCore.showcaseIdx = list.length - 1;
-    if (appCore.showcaseIdx >= list.length) appCore.showcaseIdx = 0;
+appCore.setHomeFilter = function(catKey, btnEl) {
+    appCore.currentHomeFilter = catKey;
+    window.hapticTap();
+    window.playSound('pop');
 
-    const game = list[appCore.showcaseIdx];
-    const card = document.getElementById('showcase-active-card');
-    const indicator = document.getElementById('showcase-indicator-text');
-    const dotsTrack = document.getElementById('showcase-dots');
+    const pills = document.querySelectorAll('.home-filter-bar .filter-pill');
+    pills.forEach(p => p.classList.remove('active'));
+    if (btnEl) btnEl.classList.add('active');
 
-    if (indicator) {
-        indicator.innerText = `Jogo ${appCore.showcaseIdx + 1} de ${list.length}`;
+    appCore.renderHomeGrid();
+};
+
+appCore.renderHomeGrid = function() {
+    const grid = document.getElementById('home-games-grid');
+    if (!grid) return;
+
+    let list = window.gameCatalog || [];
+    if (appCore.currentHomeFilter !== 'all') {
+        list = list.filter(g => g.catKey === appCore.currentHomeFilter);
     }
 
-    if (dotsTrack) {
-        dotsTrack.innerHTML = list.map((_, i) => 
-            `<div class="showcase-dot ${i === appCore.showcaseIdx ? 'active' : ''}" onclick="appCore.jumpToShowcase(${i})"></div>`
-        ).join('');
-    }
-
-    if (card) {
-        card.className = `showcase-card cat-${game.catKey}`;
-        card.innerHTML = `
-            <div>
-                <span class="card-cat-badge">${game.catName}</span>
-                <div class="card-game-icon">${game.icon}</div>
-                <h1 class="card-game-title">${game.title}</h1>
-                <div class="card-game-meta">Mín ${game.min} Guerreiros • ${game.badge}</div>
-                <p class="card-game-hook">"${game.hook}"</p>
+    grid.innerHTML = list.map(g => `
+        <div class="game-grid-card cat-${g.catKey}" onclick="appCore.openGameLobby('${g.id}')">
+            <div class="game-grid-top">
+                <div class="game-grid-icon-box">${g.icon}</div>
+                <div class="game-grid-min-badge">Mín ${g.min}</div>
             </div>
-            <button class="card-play-btn" onclick="appCore.openGameLobby('${game.id}')">
-                JOGAR ESTE ➔
-            </button>
-        `;
+            <div>
+                <div class="game-grid-title">${g.title}</div>
+                <div class="game-grid-tag">${g.badge}</div>
+            </div>
+        </div>
+    `).join('');
 
-        if (animateDir !== 0 && typeof window.gsap !== 'undefined') {
-            window.gsap.fromTo(card, 
-                { x: animateDir * 70, opacity: 0.3, rotation: animateDir * 4 }, 
-                { x: 0, opacity: 1, rotation: 0, duration: 0.28, ease: 'back.out(1.8)' }
-            );
-        }
+    if (typeof window.gsap !== 'undefined') {
+        window.gsap.fromTo('.game-grid-card', 
+            { opacity: 0, y: 8 }, 
+            { opacity: 1, y: 0, duration: 0.22, stagger: 0.02, ease: 'power2.out' }
+        );
     }
 };
 
-appCore.showcaseNav = function(dir) {
-    appCore.showcaseIdx += dir;
-    window.hapticTap();
-    window.playSound('pop');
-    appCore.renderShowcaseCard(dir);
-};
-
-appCore.jumpToShowcase = function(idx) {
-    const dir = idx > appCore.showcaseIdx ? 1 : -1;
-    appCore.showcaseIdx = idx;
-    window.hapticTap();
-    window.playSound('pop');
-    appCore.renderShowcaseCard(dir);
-};
-
-appCore.bindShowcaseGestures = function() {
-    const wrapper = document.getElementById('showcase-card-wrapper');
-    if (!wrapper || wrapper._gesturesBound) return;
-    wrapper._gesturesBound = true;
-
-    let startX = 0, currentX = 0, isDragging = false;
-
-    wrapper.addEventListener('pointerdown', (e) => {
-        if (e.target.tagName === 'BUTTON' || e.target.closest('button')) return;
-        startX = e.clientX;
-        currentX = e.clientX;
-        isDragging = true;
-    });
-
-    window.addEventListener('pointermove', (e) => {
-        if (!isDragging) return;
-        currentX = e.clientX;
-        const diffX = currentX - startX;
-        const card = document.getElementById('showcase-active-card');
-        if (card && Math.abs(diffX) < 120) {
-            card.style.transform = `translateX(${diffX * 0.45}px) rotate(${diffX * 0.04}deg)`;
-        }
-    });
-
-    const endDrag = () => {
-        if (!isDragging) return;
-        isDragging = false;
-        const diffX = currentX - startX;
-        const card = document.getElementById('showcase-active-card');
-        if (card) card.style.transform = '';
-
-        if (diffX < -45) {
-            appCore.showcaseNav(1);
-        } else if (diffX > 45) {
-            appCore.showcaseNav(-1);
-        }
-    };
-
-    window.addEventListener('pointerup', endDrag);
-    window.addEventListener('pointercancel', endDrag);
-};
+// Aliases para compatibilidade caso chamados em algum fluxo legado
+appCore.showcaseIdx = 0;
+appCore.renderShowcaseCard = function() { appCore.renderHomeGrid(); };
+appCore.showcaseNav = function() {};
+appCore.jumpToShowcase = function() {};
+appCore.bindShowcaseGestures = function() {};
 
 appCore.abrirCatalogoCompleto = function() {
     window.hapticTap();
@@ -826,7 +841,7 @@ appCore.renderCatalogList = function(category = 'all') {
                 <div class="catalog-row-icon cat-${g.catKey}" style="background:var(--bg-surface);">${g.icon}</div>
                 <div>
                     <h4 class="catalog-row-title">${g.title}</h4>
-                    <span class="catalog-row-meta">Mín ${g.min} Guerreiros • ${g.badge}</span>
+                    <span class="catalog-row-meta">Mín ${g.min} Jogadores • ${g.badge}</span>
                 </div>
             </div>
             <div class="catalog-row-cta">JOGAR ➔</div>
@@ -844,202 +859,192 @@ window.gameTitles = {
 window.gameGuides = {
     impostor: {
         icon: '🕵️',
-        minPlayers: 'Mín 3 Guerreiros',
-        tagline: 'Descubra quem não sabe a palavra secreta antes que a mesa seja enganada!',
+        minPlayers: 'Mín 3',
+        tagline: 'Descubra quem não sabe a palavra secreta antes da votação!',
         steps: [
-            { title: 'Passe o Celular', desc: 'Inocentes recebem Tema + Palavra Secreta. O Impostor recebe apenas o Tema e fica no escuro!' },
-            { title: 'Perguntas Sutis', desc: 'Façam perguntas indiretas em roda. Cuidado para não entregar a palavra ao Impostor!' },
-            { title: 'Votação no Tribunal', desc: 'Debatam e votem no suspeito. Inocentes vencem acertando o Impostor (+10 Pts)!' }
-        ],
-        goldenRule: 'O melhor Impostor não fica em silêncio: dê respostas neutras que se encaixem em quase tudo!',
-        rolesInfo: '🤡 Bobo da Corte: Sabe a palavra real, mas vence sozinho (+25 Pts) se a mesa votar nele no tribunal!'
+            { title: 'Palavra Secreta', desc: 'Todos veem a palavra secreta na tela, menos o Impostor.' },
+            { title: 'Perguntas na Mesa', desc: 'Façam perguntas em roda para testar quem sabe sem entregar a palavra.' },
+            { title: 'Votação', desc: 'Votem em quem acham que é o Impostor. Inocentes vencem se acertarem!' }
+        ]
     },
     duplas: {
         icon: '👯',
-        minPlayers: 'Mín 5 Guerreiros',
-        tagline: 'Encontre seu par secreto sem entregar sua identidade ao Infiltrado Solitário!',
+        minPlayers: 'Mín 5',
+        tagline: 'Encontre seu par secreto sem entregar sua palavra ao infiltrado!',
         steps: [
-            { title: 'Pares Secretos', desc: 'O celular distribui palavras que formam duplas (ex: Batman e Coringa). Um jogador fica avulso (Infiltrado)!' },
-            { title: 'Dicas Indiretas', desc: 'Vão conversando na mesa para identificar seu parceiro sem falar as palavras abertamente.' },
-            { title: 'Eliminar Infiltrado', desc: 'Achem e votem na pessoa que não tem par antes que ela descubra as duplas!' }
-        ],
-        goldenRule: 'Não fale palavras óbvias demais: se o infiltrado perceber a ligação, ele rouba o seu lugar!',
-        rolesInfo: '🤡 Bobo da Corte: Tenta se passar pelo infiltrado para ser eliminado e vencer (+25 Pts) sozinho!'
+            { title: 'Pares Secretos', desc: 'Cada um recebe uma palavra que faz par com a de outro jogador. Um fica avulso!' },
+            { title: 'Dicas Indiretas', desc: 'Conversem na mesa para achar seu par sem falar a palavra abertamente.' },
+            { title: 'Votação', desc: 'Descubram e eliminem quem ficou sem par antes que ele descubra as duplas.' }
+        ]
     },
     macabro: {
         icon: '🔪',
-        minPlayers: 'Mín 2 Guerreiros',
-        tagline: 'Desvende o mistério bizarro fazendo apenas perguntas de Sim ou Não ao narrador!',
+        minPlayers: 'Mín 2',
+        tagline: 'Desvende o mistério bizarro fazendo perguntas de Sim ou Não ao narrador!',
         steps: [
-            { title: 'O Enigma', desc: 'O narrador lê a situação sinistra em voz alta e segura o botão para ler a resposta secreta.' },
-            { title: 'Interrogatório', desc: 'A mesa faz perguntas livres. O narrador responde apenas SIM, NÃO ou IRRELEVANTE.' },
-            { title: 'Caso Resolvido', desc: 'Quando a mesa reconstruir toda a história, toquem em "Desvendado" (+15 Pts para todos)!' }
-        ],
-        goldenRule: 'Profissões, metáforas e detalhes sutis de tempo/clima quase sempre escondem a chave do mistério!'
+            { title: 'O Mistério', desc: 'O narrador lê o caso em voz alta e segura o botão para ver a resposta secreta.' },
+            { title: 'Perguntas', desc: 'A mesa faz perguntas livres e o narrador responde apenas Sim, Não ou Irrelevante.' },
+            { title: 'Desvendar', desc: 'Reconstruam a história completa juntos para pontuar!' }
+        ]
     },
     posicao: {
         icon: '📈',
-        minPlayers: 'Mín 3 Guerreiros',
-        tagline: 'Organize as cartas de 1 a 10 apenas com dicas conceituais de intensidade!',
+        minPlayers: 'Mín 3',
+        tagline: 'Organize as posições de 1 a 10 apenas com dicas de intensidade!',
         steps: [
-            { title: 'Notas Secretas', desc: 'Cada um recebe um número secreto de 1 a 10 no celular sobre o tema sorteado.' },
-            { title: 'Dicas na Mesa', desc: 'Dêem dicas orais expressando a intensidade do seu número (terminantemente proibido falar dígitos!).' },
-            { title: 'Ordenar na Tela', desc: 'Arrumem a lista na ordem crescente do menor para o maior e apertem "Verificar Gabarito"!' }
-        ],
-        goldenRule: 'Crie analogias claras: se 1 é um sopro e 10 é um furacão, calibre a sua intensidade com precisão!',
-        rolesInfo: '🧨 Sabotador: Se a mesa errar a ordem, o Sabotador rouba +20 Pts sozinho!'
+            { title: 'Número Secreto', desc: 'Cada um recebe um número de 1 a 10 sobre o tema sorteado.' },
+            { title: 'Dicas de Intensidade', desc: 'Deem dicas orais da intensidade do número (sem falar algarismos!).' },
+            { title: 'Organizar', desc: 'Coloquem na ordem do menor para o maior e confiram o gabarito.' }
+        ]
     },
     nota: {
         icon: '🎯',
-        minPlayers: 'Mín 2 Guerreiros (Em Dupla)',
-        tagline: 'Segure para ver a nota secreta e calibre a sintonia da dupla com perguntas temáticas!',
+        minPlayers: 'Mín 2 (Dupla)',
+        tagline: 'Segure para ver a nota secreta e calibre a sintonia da dupla!',
         steps: [
-            { title: 'Segure para Ver', desc: 'O Parceiro 1 segura o botão na tela para ver a nota (1 a 10) sem ninguém espiar.' },
-            { title: 'Perguntas de Calibração', desc: 'O Parceiro 2 faz perguntas temáticas ("Comida, Filme ou Música com essa nota?") para calibrar.' },
-            { title: 'Chute da Dupla', desc: 'O Parceiro 2 escolhe no seletor 1 a 10. Na mosca = +20 Pts para a dupla!' }
-        ],
-        goldenRule: 'Use as sugestões de perguntas para calibrar se um 7 é bom ou se é só aceitável!'
+            { title: 'Nota Secreta', desc: 'Um jogador segura a tela para ver a nota de 1 a 10 em segredo.' },
+            { title: 'Calibração', desc: 'O parceiro faz perguntas temáticas para calibrar a intensidade.' },
+            { title: 'Chute', desc: 'O parceiro chuta o valor no seletor. Se acertar em cheio, ganham ponto!' }
+        ]
     },
     unica: {
         icon: '💡',
-        minPlayers: 'Mín 3 Guerreiros',
-        tagline: 'Dicas repetidas são ANULADAS! Seja criativo para ajudar o adivinhador!',
+        minPlayers: 'Mín 3',
+        tagline: 'Dicas repetidas são apagadas! Seja criativo para ajudar o adivinhador.',
         steps: [
-            { title: 'Olhos Fechados', desc: 'O Adivinhador fecha os olhos enquanto o celular passa pela roda.' },
-            { title: '1 Dica por Pessoa', desc: 'Cada um digita secretamente 1 única palavra como pista da palavra secreta.' },
-            { title: 'Filtro Automático', desc: 'O jogo anula todas as dicas repetidas! O Adivinhador chuta usando apenas as pistas únicas.' }
-        ],
-        goldenRule: 'Fuja do óbvio: a palavra mais comum sempre será pensada por duas pessoas e acabará anulada!'
+            { title: 'Olhos Fechados', desc: 'O adivinhador fecha os olhos enquanto o celular passa na roda.' },
+            { title: 'Uma Dica Cada', desc: 'Cada um digita 1 palavra de dica. Dicas repetidas são apagadas pelo jogo!' },
+            { title: 'Adivinhar', desc: 'O adivinhador tenta acertar a palavra usando apenas as pistas que sobraram.' }
+        ]
     },
     quemsoueu: {
         icon: '🤔',
-        minPlayers: 'Mín 4 Guerreiros (2 Equipes)',
-        tagline: 'Celular deitado na mesa! Cada equipe pergunta e responde entre si: quem acertar primeiro vence!',
+        minPlayers: 'Mín 4 (2 Duplas)',
+        tagline: 'Celular deitado na mesa! Perguntem e respondam ao mesmo tempo.',
         steps: [
-            { title: 'Celular na Mesa', desc: 'Coloque o celular deitado entre as duas equipes. Cada parceiro que responde olha a palavra do seu colega.' },
-            { title: 'Perguntas Exclusivas', desc: 'As duas equipes jogam ao mesmo tempo! Você só responde "Sim / Não" para o seu parceiro.' },
-            { title: 'Corrida sem Limite', desc: 'Sem pressão de cronômetro: a equipe que acertar primeiro toca no seu botão e leva +20 Pts para o time!' }
-        ],
-        goldenRule: 'Responda rápido para o seu parceiro não perder tempo enquanto a outra equipe pergunta!'
+            { title: 'Celular na Mesa', desc: 'Deitem o celular na mesa entre as duas duplas.' },
+            { title: 'Perguntas Simultâneas', desc: 'As duas duplas jogam ao mesmo tempo, fazendo perguntas de Sim ou Não.' },
+            { title: 'Bater e Vencer', desc: 'A primeira dupla a adivinhar bate no botão e vence a rodada!' }
+        ]
     },
     megasenha: {
         icon: '🗣️',
-        minPlayers: 'Mín 4 Guerreiros (2 Duplas)',
-        tagline: 'Duelo de 5 senhas: dê 1 palavra por vez até sua dupla acertar primeiro!',
+        minPlayers: 'Mín 4 (2 Duplas)',
+        tagline: 'Duelo de senhas: dê 1 palavra de pista por vez até alguém acertar!',
         steps: [
-            { title: 'Oradores na Tela', desc: 'Os dois oradores olham a mesma senha secreta na tela.' },
-            { title: 'Vez Alternada', desc: 'Time A dá 1 palavra de dica. Se errar, Time B dá 1 palavra. Alterna até alguém acertar!' },
-            { title: 'Melhor de 5 Senhas', desc: 'A dupla que acertar a senha fatura +10 Pts. Quem somar mais em 5 palavras vence a rodada!' }
-        ],
-        goldenRule: 'Proibido falar palavras da mesma família ou gesticular!'
+            { title: 'Senha na Tela', desc: 'Os oradores dos dois times leem a mesma senha secreta.' },
+            { title: 'Uma Palavra por Vez', desc: 'Os times alternam dando 1 palavra de pista por tentativa.' },
+            { title: 'Ponto Rápido', desc: 'Quem acertar primeiro ganha a senha. Disputem a melhor de 5!' }
+        ]
     },
     completa: {
         icon: '🧩',
-        minPlayers: 'Mín 3 Guerreiros',
-        tagline: 'Speedrun de 40s! 2 dadores de dica alternam palavras, gritam "COMPLETA!" na vida real e o 3º responde!',
+        minPlayers: 'Mín 3',
+        tagline: 'Speedrun de 40s! Alternem palavras, gritem COMPLETA e adivinhem!',
         steps: [
-            { title: 'A Corrida dos 40s', desc: 'O relógio de 40 segundos começa a correr para abrir até 8 palavras do tema.' },
-            { title: 'Alternância e Voz', desc: 'Jogador 1 fala 1 palavra, Jogador 2 fala 1 palavra. Quando a pista estiver pronta, gritem "COMPLETA!" na vida real.' },
-            { title: 'Chute do Adivinhador', desc: 'O Jogador 3 responde na hora. Acertou? +10 Pts e a próxima palavra entra imediatamente!' }
-        ],
-        goldenRule: 'Seja veloz: se a dica ficou clara em 2 palavras, gritem COMPLETA na hora sem hesitar!'
+            { title: 'Tempo Correndo', desc: 'O cronômetro de 40s começa a correr na tela.' },
+            { title: 'Pista em Dupla', desc: 'Dois jogadores alternam palavras e gritam COMPLETA quando estiver pronto.' },
+            { title: 'Resposta Imediata', desc: 'O terceiro jogador responde na hora para abrir a próxima carta!' }
+        ]
     },
     mimica: {
         icon: '🤹',
-        minPlayers: 'Mín 2 Guerreiros',
-        tagline: 'O Ator escolhe a dificuldade e arrisca os pontos; quem adivinhar primeiro leva bônus!',
+        minPlayers: 'Mín 2',
+        tagline: 'Escolha o risco da carta e atue sem som; quem acertar ganha bônus!',
         steps: [
-            { title: 'Escolha do Ator', desc: 'O ator escolhe na tela o nível de risco: Fácil (+10), Média (+20) ou Difícil (+30).' },
-            { title: 'Atuação Muda', desc: 'Gere gestos sem emitir sons. A mesa toda tenta adivinhar o mais rápido possível.' },
-            { title: 'Pontos Divididos', desc: 'O Ator ganha os pontos da carta arriscada! O Adivinhador rápido ganha +10 Pts de bônus!' }
-        ],
-        goldenRule: 'Indique com os dedos no início quantas palavras tem a mímica!'
+            { title: 'Escolha do Risco', desc: 'O ator escolhe uma carta Fácil, Média ou Difícil na tela.' },
+            { title: 'Mímica Silenciosa', desc: 'Faça os gestos sem emitir nenhum som enquanto a mesa tenta adivinhar.' },
+            { title: 'Pontuação', desc: 'O ator ganha os pontos da carta e quem acertou ganha bônus!' }
+        ]
     },
     stop: {
         icon: '🛑',
-        minPlayers: 'Mín 2 Guerreiros',
-        tagline: 'O tempo cai a cada acerto! Quem travar é eliminado e os sobreviventes seguem com novo tema!',
+        minPlayers: 'Mín 2',
+        tagline: 'O tempo encurta a cada acerto! Quem travar é eliminado da rodada.',
         steps: [
-            { title: 'Letra & Aceleração', desc: 'Fale uma palavra no tema com a letra sorteada. A cada acerto, o tempo encurta!' },
-            { title: 'Eliminação da Rodada', desc: 'O relógio zerou? Aponte quem travou. Essa pessoa sai da rodada.' },
-            { title: 'Sobrevivência', desc: 'Novo tema e letra sorteados para os sobreviventes até restar o campeão da mesa (+25 Pts)!' }
-        ],
-        goldenRule: 'Mantenha o foco absoluto: nas rodadas avançadas o tempo é relâmpago!'
+            { title: 'Letra e Tema', desc: 'Fale rápido uma palavra do tema sorteado com a letra indicada.' },
+            { title: 'Trocar Letra', desc: 'Toque no botão para passar a vez e resetar o relógio.' },
+            { title: 'Sobrevivência', desc: 'Quem deixar o relógio zerar sai da rodada. Vence o último a sobrar!' }
+        ]
     },
     sevira: {
         icon: '⏱️',
-        minPlayers: 'Mín 2 Guerreiros',
-        tagline: 'A bomba acelera a cada eliminado! Fale um item, passe o celular e sobreviva!',
+        minPlayers: 'Mín 2',
+        tagline: 'A bomba está correndo na roda! Fale um item, passe e sobreviva.',
         steps: [
-            { title: 'Bomba Ticando', desc: 'Fale um item da categoria e passe o celular rápido tocando no botão.' },
-            { title: 'Quem Estourou Sai', desc: 'Ao explodir, selecione na tela quem estava segurando a bomba.' },
-            { title: 'Pavio Encurtando', desc: 'A próxima rodada começa com pavio 30% mais curto para os sobreviventes!' }
-        ],
-        goldenRule: 'Já entregue o celular na direção do próximo enquanto fala a sua resposta!'
+            { title: 'Bomba na Mão', desc: 'Fale um item da categoria sorteada e passe o celular imediatamente.' },
+            { title: 'Toque para Passar', desc: 'Toque no botão para passar a bomba para o próximo jogador.' },
+            { title: 'Sobreviva', desc: 'Quem estiver com o celular quando a bomba explodir é eliminado!' }
+        ]
     },
     cinco: {
         icon: '✋',
-        minPlayers: 'Mín 2 Guerreiros',
-        tagline: 'Parece fácil... até você ter que falar 3 coisas em exatos 5 segundos!',
+        minPlayers: 'Mín 2',
+        tagline: 'Fale 3 itens do tema em exatos 5 segundos antes do alarme soar!',
         steps: [
-            { title: 'O Desafio', desc: 'A tela exibe o desafio: "Diga 3... (ex: Marcas de Carro)".' },
-            { title: '5 Bipes Curtos', desc: 'Ao disparar, você tem 5 segundos contados nos bipes sonoros para falar tudo.' },
-            { title: 'Julgamento', desc: 'A mesa decide se as 3 respostas foram válidas e se você não gaguejou.' }
-        ],
-        goldenRule: 'Fale o que vier no impulso sem filtrar, porque se você pensar meio segundo o tempo acaba!'
+            { title: 'Desafio na Tela', desc: 'Aparece um desafio como: Diga 3 marcas de carro.' },
+            { title: 'Cinco Segundos', desc: 'Toque em iniciar e fale os 3 itens antes dos 5 bipes acabarem.' },
+            { title: 'Mesa Decide', desc: 'A roda valida se as 3 respostas foram corretas a tempo.' }
+        ]
     },
     batata: {
         icon: '💣',
-        minPlayers: 'Mín 3 Guerreiros',
-        tagline: 'Passe suave! A cada explosão a tensão sobe com tempo secreto ainda mais rápido!',
+        minPlayers: 'Mín 3',
+        tagline: 'Passe suave! Qualquer movimento brusco detona a bomba na hora.',
         steps: [
-            { title: 'Passe com Calma', desc: 'Segure o celular com máxima estabilidade e passe na roda com movimentos suaves.' },
-            { title: 'Sensor de Tremor', desc: 'Movimentos bruscos, balanços rápidos ou solavancos detonam a bomba na hora!' },
-            { title: 'Pavio Curto', desc: 'A rodada seguinte recomeça com tempo secreto reduzido até o sobrevivente final!' }
-        ],
-        goldenRule: 'Não tente acelerar o passe: a bomba perdoa lentidão, mas odeia solavancos!'
+            { title: 'Movimento Suave', desc: 'Passe o celular com máximo cuidado e calma na roda.' },
+            { title: 'Sensor de Tremor', desc: 'Qualquer movimento brusco ou sacudida explode a bomba na hora!' },
+            { title: 'Tempo Surpresa', desc: 'O tempo de explosão é secreto. Sobreviva até o fim da rodada!' }
+        ]
     },
     ultimo: {
         icon: '☠️',
-        minPlayers: 'Mín 2 Guerreiros',
-        tagline: 'Contagem 3, 2, 1... Tema surpresa na tela! Quem falar por último é eliminado!',
+        minPlayers: 'Mín 2',
+        tagline: 'Contagem 3, 2, 1... Tema surpresa na tela! Quem falar por último sai.',
         steps: [
-            { title: 'Contagem 3.. 2.. 1..', desc: 'Suspense na tela! O tema surge de surpresa após o alarme sonoro.' },
-            { title: 'Gritaria na Roda', desc: 'Todos falam um item em roda rapidamente.' },
-            { title: 'Apontar Eliminado', desc: 'Quem hesitou, repetiu ou falou por último é eliminado. Novo tema para quem sobrou!' }
-        ],
-        goldenRule: 'Tenha 2 ou 3 itens na ponta da língua assim que bater os olhos no tema!'
+            { title: 'Contagem Surpresa', desc: 'Contagem 3, 2, 1... e o tema surge de repente na tela!' },
+            { title: 'Falar Rápido', desc: 'Todos na roda devem falar um item do tema em voz alta o mais rápido possível.' },
+            { title: 'Eliminação', desc: 'Quem hesitar, travar ou falar por último é eliminado!' }
+        ]
     }
 };
 
 window.gameInstructions = {
     impostor: "Inocentes recebem tema e palavra secreta. O Impostor recebe só o tema e NÃO sabe a palavra! Debatam, façam perguntas indiretas e votem no suspeito.",
-    duplas: "Jogadores formam pares secretos com a mesma palavra. Há 1 ou 2 Infiltrados na mesa. Ache sua dupla sem entregar a palavra ao impostor!",
-    macabro: "O Mestre lê o enigma mórbido. A mesa faz perguntas de 'Sim' ou 'Não' até desvendar a história completa.",
-    posicao: "Todos recebem secretamente números de 1 a 10 para uma escala temática. Sem falar números, dêem dicas e arranjem as cartas na ordem crescente correta!",
-    nota: "O jogador vê secretamente uma nota de 1 a 10 e a esconde. Dá uma dica verbal daquela intensidade e a mesa chuta o número no seletor!",
+    duplas: "Jogadores formam pares secretos com a mesma palavra. Há 1 Infiltrado na mesa. Ache sua dupla sem entregar a palavra ao infiltrado!",
+    macabro: "O Narrador lê o enigma misterioso. A mesa faz perguntas de 'Sim', 'Não' ou 'Irrelevante' até desvendar a história completa.",
+    posicao: "Todos recebem secretamente números de 1 a 10 para uma escala temática. Sem falar números, deem dicas e organizem as cartas na ordem crescente correta!",
+    nota: "O jogador vê secretamente uma nota de 1 a 10 e a esconde. Dá uma dica verbal daquela intensidade e o parceiro chuta o número no seletor!",
     unica: "O Adivinhador fecha os olhos. Todos digitam 1 palavra de dica no celular. Dicas repetidas são ANULADAS automaticamente pelo jogo!",
-    quemsoueu: "Cole o celular na testa! A mesa grita pistas da palavra e você toca em ACERTOU ou PULAR antes do tempo acabar.",
-    megasenha: "Em duplas: um guerreiro dá dicas de 1 única palavra e o parceiro tenta acertar a senha antes que o relógio zere.",
+    quemsoueu: "Celular deitado na mesa! As duas duplas jogam ao mesmo tempo, fazendo perguntas de Sim ou Não para acertar a palavra secreta antes dos rivais.",
+    megasenha: "Em duplas: um jogador dá dicas de 1 única palavra e o parceiro tenta acertar a senha antes que o relógio zere.",
     completa: "Painel com 8 palavras do tema. A equipe dá dicas e tenta abrir todas as 8 caixas antes do cronômetro zerar.",
-    mimica: "Um guerreiro faz mímica para a equipe adivinhar a ação ou personagem. Sons são terminantemente proibidos!",
+    mimica: "Um jogador faz mímica para a equipe adivinhar a ação ou personagem. Sons são terminantemente proibidos!",
     stop: "Sorteia Tema + Letra com timer rápido de 10s. Quem falar uma palavra válida toca no botão para trocar a letra e resetar o tempo!",
-    sevira: "A bomba vai estourar! Fale um item da categoria exibida e passe o celular rápido para o próximo guerreiro da roda.",
-    cinco: "A tela mostra 'Diga 3...'. Ao disparar, o guerreiro tem exatos 5 Segundos para falar tudo sem gaguejar!",
+    sevira: "A bomba vai estourar! Fale um item da categoria exibida e passe o celular rápido para a próxima pessoa da roda.",
+    cinco: "A tela mostra 'Diga 3...'. Ao disparar, você tem exatos 5 Segundos para falar tudo sem gaguejar!",
     batata: "Passe o celular com cuidado! O tempo é surpresa e qualquer movimento brusco faz o sensor de aceleração explodir a bomba!",
-    ultimo: "Tema livre na tela com cronômetro de 8s. A mesa vai falando itens em roda. Quem demorar ou repetir perde a vida!"
+    ultimo: "Tema livre na tela com contagem rápida. A mesa vai falando itens em roda. Quem demorar, travar ou repetir é eliminado!"
 };
 
 window.categoriasIniciais = {
-    'Animais': ['Leão','Tigre','Elefante','Cachorro','Gato','Girafa','Crocodilo','Águia','Pinguim','Urso','Lobo','Tartaruga','Cobra','Sapo','Baleia','Tubarão','Gorila','Capivara','Macaco'],
-    'Comida': ['Pizza','Hambúrguer','Sushi','Lasanha','Salada','Sorvete','Churrasco','Bolo','Pastel','Macarronada','Feijoada','Taco','Batata Frita','Chocolate','Coxinha'],
-    'Famosos': ['Silvio Santos','Anitta','Michael Jackson','Neymar','Rihanna','Will Smith','Beyoncé','Leonardo DiCaprio','Tom Cruise','Faustão','Xuxa'],
-    'Ciências': ['Tabela Periódica','Átomo','Laboratório','Reação','Microscópio','DNA','Molécula','Ácido','Gravidade','Fóssil','Buraco Negro'],
-    'Cinema & TV': ['Pipoca','Oscar','Diretor','Bilheteria','Tela Grande','Vilão','Super-Herói','Dublê','Roteiro','Trilha Sonora','Zumbi'],
-    'Lugares': ['Hospital','Cassino','Submarino','Estação Espacial','Circo','Aeroporto','Navio Pirata','Escola','Restaurante','Prisão']
+    'Animais': ['Leão','Tigre','Elefante','Cachorro','Gato','Girafa','Crocodilo','Águia','Pinguim','Urso','Lobo','Tartaruga','Cobra','Sapo','Baleia','Tubarão','Gorila','Capivara','Macaco','Panda','Camelo','Golfinho','Zebra','Hipopótamo','Gavião','Morcego','Chimpanzé','Tamanduá','Arara','Polvo','Lontra','Lhama'],
+    'Comida': ['Pizza','Hambúrguer','Sushi','Lasanha','Salada','Sorvete','Churrasco','Bolo','Pastel','Macarronada','Feijoada','Taco','Batata Frita','Chocolate','Coxinha','Pão de Queijo','Açaí','Brigadeiro','Estrogonofe','Moqueca','Tapioca','Pipoca Doce','Churros','Fondue','Esfiha','Empadão'],
+    'Famosos': ['Silvio Santos','Anitta','Michael Jackson','Neymar','Rihanna','Will Smith','Beyoncé','Leonardo DiCaprio','Tom Cruise','Faustão','Xuxa','Ivete Sangalo','Keanu Reeves','Cristiano Ronaldo','Messi','Zeca Pagodinho','Casimiro','Ludmilla','Marília Mendonça','Alok','Whindersson Nunes','Bruna Marquezine'],
+    'Ciências': ['Tabela Periódica','Átomo','Laboratório','Reação','Microscópio','DNA','Molécula','Ácido','Gravidade','Fóssil','Buraco Negro','Telescópio','Velocidade da Luz','Termodinâmica','Bactéria','Supernova','Clonagem','Eletromagnetismo','Fotossíntese','Fissão Nuclear'],
+    'Cinema & TV': ['Pipoca','Oscar','Diretor','Bilheteria','Tela Grande','Vilão','Super-Herói','Dublê','Roteiro','Trilha Sonora','Zumbi','Câmera','Efeitos Especiais','Dublagem','Figurino','Claquete','Cena Pós-Créditos','Trailer','Festival de Cannes','Casting'],
+    'Lugares': ['Hospital','Cassino','Submarino','Estação Espacial','Circo','Aeroporto','Navio Pirata','Escola','Restaurante','Prisão','Museu Assombrado','Farol Abandonado','Parque de Diversões','Ilha Deserta','Banco Central','Boate Subterrânea','Hotel Fazenda','Bunker Nuclear'],
+    'Profissões Inusitadas': ['Astronauta','Domador de Leão','Detetive Particular','Influencer Falido','Sommelier de Água','Dublê de Ação','Paparazzi','Pipoqueiro de Circo','Arqueólogo','Papai Noel de Shopping','Piloto de Fuga','Crítico Gastronômico','Caçador de Fantasmas','Instrutor de Yoga','Testador de Colchão'],
+    'Cultura Pop & Memes': ['Casimiro','Luva de Pedreiro','Gretchen','Nazaré Confusa','Bambam','Manoel Gomes','Caneta Azul','Vira-Lata Caramelo','Tiringa','Choque de Cultura','Galo Cego','Grávida de Taubaté','Bora Bill','Patati Patatá','Inês Brasil'],
+    'Perrengues do Cotidiano': ['Bateria em 1%','Chave Trancada pra Dentro','Boleto Vencido','Pneu Furado na Chuva','Água Acabou no Banho','Esquecer o Nome da Pessoa','Comida Queimando','Salto Quebrado','Mensagem pro Grupo Errado','Cartão Recusado','Fila do Banco','Ficar Preso no Elevador']
 };
 
-window.caosWords = ['Motel', 'Preservativo', 'Ressaca', 'Gemido', 'Traição', 'Calcinha', 'Cabaré', 'Algemas', 'Orgia', 'Tatuagem Íntima', 'OnlyFans', 'Cerveja', 'Tinder', 'Nude'];
+window.caosWords = [
+    'Motel', 'Preservativo', 'Ressaca', 'Gemido', 'Traição', 'Calcinha', 'Cabaré', 'Algemas', 'Orgia', 
+    'Tatuagem Íntima', 'OnlyFans', 'Cerveja', 'Tinder', 'Nude', 'Ex-Namorado(a)', 'Chifre', 'Banho a Dois', 
+    'Selinho Roubado', 'Garganta Seca', 'Striptease', 'Fetiche Estranho', 'Crush Secreto', 'Censurado', 
+    'Madrugada Insana', 'Boca Suja', 'Gemidão do Zap', 'Perder a Linha', 'Chupão no Pescoço', 'Noite em Vegas'
+];
 
 window.prendasLista = [
     { t: "Falar com Sotaque", d: "Fale com sotaque francês ou caipira até o final da próxima rodada!" },
@@ -1047,14 +1052,43 @@ window.prendasLista = [
     { t: "Foto da Galeria", d: "Mostre a última foto da sua galeria do celular para a mesa!" },
     { t: "Elogio Constrangedor", d: "Faça um elogio poético e super dramático para quem estiver à sua direita!" },
     { t: "Mímica Secreta", d: "Imite uma galinha chocando um ovo por 10 segundos sem rir!" },
-    { t: "10 Polichinelos", d: "Levante agora e pague 10 polichinelos gritando 'Sou um guerreiro!'." }
+    { t: "10 Polichinelos", d: "Levante agora e pague 10 polichinelos gritando 'Eu sou uma lenda!'." },
+    { t: "Declaração Dramática", d: "Declare seu amor eterno para o copo ou garrafa mais próxima como se fosse Romeu e Julieta!" },
+    { t: "Narrador de Novela", d: "Narre os próximos 2 minutos da partida com a voz e o suspense de uma novela mexicana!" },
+    { t: "Telejornal Sensacionalista", d: "Anuncie a pontuação do líder da mesa com a voz estridente de um plantão policial urgente!" },
+    { t: "Sem Piscar", d: "Olhe fixamente nos olhos do jogador da sua frente por 20 segundos sem piscar nem rir!" },
+    { t: "Robô em Curto", d: "Fale com voz e movimentos de robô engasgado até a sua próxima rodada começar!" },
+    { t: "Dancinha de TikTok", d: "Invente e execute uma dancinha ridícula de 10 segundos sem nenhuma música de fundo!" },
+    { t: "Garçom da Mesa", d: "Sirva um copo de água ou bebida com elegância máxima para os 2 jogadores com mais pontos!" },
+    { t: "Imitação de Celebridade", d: "Imite o Silvio Santos ('Maaah vem pra cá!') ou Faustão ('Ô loco bicho!') durante sua próxima fala!" },
+    { t: "Apresentador de TV", d: "Tente vender um guardanapo amassado para a mesa como se fosse um item de luxo indispensável!" },
+    { t: "Rima Relâmpago", d: "Crie uma rima improvisada com o nome de pelo menos 3 pessoas da mesa em menos de 20 segundos!" },
+    { t: "Língua Presa", d: "Fale com a língua presa entre os dentes pelos próximos 45 segundos!" },
+    { t: "Pedir Bênção", d: "Aperte solenemente a mão de todos na mesa dizendo 'Que a sua vitória seja humilde, mestre'!" },
+    { t: "Estátua Grega", d: "Faça a pose mais dramática e épica que puder e fique congelado(a) por 25 segundos!" },
+    { t: "Câmera Lenta", d: "Todos os seus movimentos e falas no próximo minuto devem ser em câmera ultra lenta!" },
+    { t: "Desabafo de Vencedor", d: "Faça um discurso de agradecimento emocionado como se tivesse acabado de ganhar o Oscar!" },
+    { t: "Personal Trainer", d: "Grite um bordão motivacional militar no ouvido de quem estiver em último lugar no placar!" },
+    { t: "Palmas Solenes", d: "Puxe uma salva de palmas lenta e solene em homenagem ao líder atual da partida!" },
+    { t: "Rir de Nada", d: "Dê uma gargalhada maquiavélica de vilão de filme por 10 segundos sem parar!" }
 ];
 
 window.prendasCaos = [
     { t: "Mande um Áudio", d: "Mande um áudio no grupo da família rindo igual a uma hiena por 5 segundos!" },
     { t: "Verdade ou Mico", d: "Revele qual foi a mensagem mais constrangedora que você mandou essa semana!" },
     { t: "Estátua Humana", d: "Fique na pose mais ridícula possível até a sua vez chegar no próximo jogo!" },
-    { t: "História Secreta", d: "Conte o maior mico que você já passou bêbado(a)!" }
+    { t: "História Secreta", d: "Conte o maior mico que você já passou com bebida ou na frente de um crush!" },
+    { t: "Mensagem Misteriosa", d: "Mande 'Precisamos conversar urgente...' no WhatsApp de algum amigo aleatório e mostre a tela!" },
+    { t: "Foto de Papel de Parede", d: "Tire uma selfie com careta ridícula e coloque como tela de bloqueio do celular por 10 minutos!" },
+    { t: "Revelação do Crush", d: "Revele qual celebridade ou figura pública você secretamente pegaria sem pensar duas vezes!" },
+    { t: "Áudio Apaixonado", d: "Grave um áudio de 5 segundos cantando o refrão de 'Evidências' no grupo de amigos!" },
+    { t: "Storie Enigmático", d: "Poste a foto de um garfo ou copo vazio no Instagram com a legenda 'Finalmente encontrei a paz'!" },
+    { t: "Histórico de Busca", d: "Abra o Google no celular e leia em voz alta as últimas 3 coisas pesquisadas no histórico!" },
+    { t: "Fetiche Curioso", d: "Revele uma mania ou hábito estranho que você tem quando fica completamente sozinho em casa!" },
+    { t: "Dança da Vergonha", d: "Dance um trecho de axé dos anos 90 pulando de um pé só por 15 segundos!" },
+    { t: "Gole Duplo de Honra", d: "Beba um gole duplo da sua bebida ou tome uma colher de mostarda/ketchup da cozinha!" },
+    { t: "Chamada Relâmpago", d: "Ligue para um contato aleatório escolhido pela mesa, deixe tocar duas vezes e desligue!" },
+    { t: "Confissão de Infância", d: "Conte a maior mentira que você sustentou pros seus pais quando era criança!" }
 ];
 
 // ==========================================
@@ -1527,8 +1561,8 @@ appCore.abrirCriador = function(existingPlayer = null) {
 appCore.salvarAvatar = function() {
     const nameInput = document.getElementById('duo-name-input');
     const n = (nameInput ? nameInput.value : '').toUpperCase().trim();
-    if (!n) return window.showCustomAlert("Atenção", "Digite um nome para forjar seu guerreiro!", "✏️");
-    if (!editingPlayerId && store.players.length >= 20) return window.showCustomAlert("Arena Lotada", "Máximo de 20 guerreiros atingido.", "🛡️");
+    if (!n) return window.showCustomAlert("Atenção", "Digite um nome ou apelido para o jogador!", "✏️");
+    if (!editingPlayerId && store.players.length >= 20) return window.showCustomAlert("Mesa Cheia", "Limite máximo de 20 jogadores atingido.", "👥");
 
     const bgObj = duoColorPalettes.BackgroundColor.find(c => c.id === duoState.BackgroundColor);
     const bgHex = bgObj ? bgObj.hex : '#ffc300';
@@ -1566,9 +1600,20 @@ appCore.salvarAvatar = function() {
 // 8. NAVEGAÇÃO, MODAIS E JOGADORES
 // ==========================================
 appCore.nav = function(screenId) {
-    if (screenId === 'screen-home' || screenId === 'screen-players' || screenId === 'screen-tourney-setup') {
-        if (window.GIW?.runner) window.GIW.runner.abortCurrentGame();
+    if (prendaTimerId && screenId !== 'screen-result') {
+        clearTimeout(prendaTimerId);
+        prendaTimerId = null;
     }
+    const nonGameScreens = ['screen-home', 'screen-players', 'screen-tourney-setup', 'screen-lobby', 'screen-podio'];
+    if (nonGameScreens.includes(screenId)) {
+        if (window.GIW?.runner) window.GIW.runner.abortCurrentGame();
+        window.stopTension?.();
+    }
+
+    if (typeof window.gsap !== 'undefined') {
+        window.gsap.killTweensOf('.screen');
+    }
+
     document.querySelectorAll('.screen').forEach(s => {
         if (s.id === screenId) {
             s.style.display = 'flex';
@@ -1578,10 +1623,13 @@ appCore.nav = function(screenId) {
             s.classList.remove('active');
         }
     });
+
     const next = document.getElementById(screenId);
     if (next && typeof window.gsap !== 'undefined') {
-        window.gsap.fromTo(next, { opacity: 0, y: 14, scale: 0.985 }, { opacity: 1, y: 0, scale: 1, duration: 0.24, ease: 'power2.out' });
+        window.gsap.killTweensOf(next);
+        window.gsap.fromTo(next, { opacity: 0, y: 14, scale: 0.985 }, { opacity: 1, y: 0, scale: 1, duration: 0.2, ease: 'power2.out' });
     }
+
     document.querySelectorAll('#nav-player-count').forEach(e => e.innerText = store.players.length);
     document.querySelectorAll('.nav-item').forEach(e => e.classList.remove('active'));
     if (screenId === 'screen-home') document.getElementById('nav-btn-home')?.classList.add('active');
@@ -1589,6 +1637,23 @@ appCore.nav = function(screenId) {
     else if (screenId === 'screen-tourney-setup') document.getElementById('nav-btn-tourney')?.classList.add('active');
     bus.emit('state:updated');
 };
+
+// Pausa limpa ao minimizar aba ou trocar de aplicativo no celular
+if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            window.stopTension?.();
+            if (window.GIW?.runner?.activeGame) {
+                window.GIW.runner.isPaused = true;
+            }
+        } else {
+            if (window.GIW?.runner?.activeGame) {
+                window.GIW.runner.isPaused = false;
+                window.GIW.runner.lastTime = performance.now();
+            }
+        }
+    }, { passive: true });
+}
 
 appCore.stopAudioAndNav = function(screenId) {
     if (window.GIW?.runner) window.GIW.runner.abortCurrentGame();
@@ -1599,7 +1664,6 @@ appCore.openModal = function(id) {
     const m = document.getElementById(id);
     if (!m) return;
     m.style.display = 'flex';
-    if (id === 'store-modal') appCore.atualizarLojaNegra();
     if (typeof window.gsap !== 'undefined') {
         window.gsap.fromTo(m.querySelector('.modal-content'), { scale: 0.88, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.25, ease: 'back.out(1.5)' });
     }
@@ -1626,15 +1690,20 @@ appCore.closeModal = function(id) {
 };
 
 window.showCustomAlert = function(title, message, icon = '⚠️') {
-    document.getElementById('ca-title').innerText = title;
-    document.getElementById('ca-text').innerText = message;
-    document.getElementById('ca-icon').innerText = icon;
+    const titleEl = document.getElementById('ca-title');
+    const textEl = document.getElementById('ca-text');
+    const iconEl = document.getElementById('ca-icon');
+    if (titleEl) titleEl.innerText = title;
+    if (textEl) {
+        textEl.innerHTML = String(message).replace(/\n/g, '<br>');
+    }
+    if (iconEl) iconEl.innerText = icon;
     appCore.openModal('custom-alert-modal');
     window.vibrar(120);
     window.playBeep(true);
 };
 
-window.showPlayerSelectorModal = function({ icon = '🎯', title = 'Quem Adivinhou?', subtitle = 'Toque no guerreiro correspondente:', players = [], onSelect, cancelable = false }) {
+window.showPlayerSelectorModal = function({ icon = '🎯', title = 'Quem Adivinhou?', subtitle = 'Toque no jogador correspondente:', players = [], onSelect, cancelable = false }) {
     const modal = document.getElementById('player-select-modal');
     if (!modal) return;
     document.getElementById('psm-icon').innerText = icon;
@@ -1685,24 +1754,53 @@ window.generateCardHTML = function(p, extraClass = '', attr = '', overrideExpr =
     `;
 };
 
+window.generateStudioPlayerCard = function(p, opts = {}) {
+    const palette = ['#ff7043', '#9c27b0', '#00b0ff', '#43a047', '#e91e63', '#ffb300', '#00e676', '#7c4dff'];
+    const pIdx = typeof opts.index === 'number' ? opts.index : (store?.players?.findIndex(x => String(x.id) === String(p.id)) || 0);
+    const bgColor = p.bg && p.bg !== '#ffffff' ? p.bg : palette[Math.abs(pIdx) % palette.length];
+    const avatarImg = window.getDynamicDuoAvatarUrl ? window.getDynamicDuoAvatarUrl(p, opts.overrideExpr) : (p.avatarUrl || '');
+
+    let roleHtml = '';
+    if (opts.roleText) {
+        const isImp = opts.isImpostor;
+        roleHtml = `
+            <div class="studio-card-role-tag ${isImp ? 'is-impostor' : ''}">
+                <div class="studio-role-label" style="color: ${isImp ? '#ff2a85' : '#00f0ff'};">${opts.roleText}</div>
+                ${opts.roleSub ? `<div style="font-size:0.75rem; color:rgba(255,255,255,0.7); font-weight:700;">${opts.roleSub}</div>` : ''}
+            </div>
+        `;
+    }
+
+    return `
+        <div class="studio-player-card ${opts.extraClass || ''}" style="background-color: ${bgColor}; width: ${opts.width || '100%'}; min-height: ${opts.height || '130px'}; cursor: pointer;" ${opts.attr || ''}>
+            <div class="studio-card-header-name">${p.name}</div>
+            <div class="studio-card-avatar-body">
+                ${avatarImg ? `<img src="${avatarImg}" alt="${p.name}" style="width: 58px; height: 58px; object-fit: contain; pointer-events: none;">` : `<span style="font-size:2.8rem; pointer-events:none;">👤</span>`}
+            </div>
+            ${roleHtml}
+        </div>
+    `;
+};
+
 window.renderPlayers = function() {
     const c = document.getElementById('players-card-grid');
     if (!c) return;
-    c.innerHTML = '';
     let totalScore = 0;
 
     if (store.players.length === 0) {
-        c.innerHTML = '<p style="color:var(--ink-muted); font-weight:800; text-align:center; width:100%; margin-top:20px;">Nenhum guerreiro forjado.</p>';
+        c.innerHTML = '<p style="color:var(--ink-muted); font-weight:800; text-align:center; width:100%; margin-top:20px;">Nenhum jogador adicionado ainda.</p>';
     } else {
+        let html = '';
         store.players.forEach(p => {
             totalScore += p.score;
-            c.innerHTML += `
+            html += `
                 <div style="position:relative;">
                     ${window.generateCardHTML(p, '', `onclick="appCore.editarPlayer('${p.id}')"`)}
                     <button class="nav-icon-btn" style="position:absolute; top:-6px; right:-6px; background:var(--pop-magenta); color:white; width:26px; height:26px; font-size:0.8em; padding:0; z-index:20;" onclick="appCore.removePlayer('${p.id}')">✕</button>
                 </div>
             `;
         });
+        c.innerHTML = html;
     }
 
     const navBadge = document.getElementById('nav-player-count');
@@ -1727,7 +1825,7 @@ window.renderPlayers = function() {
     }
 
     const btnEnc = document.getElementById('btn-encerrar-noite');
-    if (btnEnc) btnEnc.style.display = totalScore > 0 ? 'block' : 'none';
+    if (btnEnc) btnEnc.style.display = store.players.length >= 2 ? 'flex' : 'none';
 
     const bannerCaos = document.getElementById('banner-caos-active');
     if (bannerCaos) bannerCaos.style.display = store.isChaos ? 'block' : 'none';
@@ -1766,8 +1864,8 @@ window.showCustomConfirm = function({ title, text, icon = '⚠️', confirmLabel
 
 appCore.zerarTodosJogadores = function() {
     window.showCustomConfirm({
-        title: "Apagar Todos os Guerreiros?",
-        text: "Deseja realmente apagar todos os guerreiros da arena?<br>Essa ação não poderá ser desfeita!",
+        title: "Apagar Todos os Jogadores?",
+        text: "Deseja realmente apagar todos os jogadores da mesa?<br>Essa ação não poderá ser desfeita!",
         icon: "🗑️",
         confirmLabel: "SIM, APAGAR TUDO",
         confirmColor: "danger",
@@ -1821,7 +1919,7 @@ appCore.gerarTurmaMagica = function() {
     }
     store.save();
     window.renderPlayers();
-    window.showCustomAlert("Mágica Concluída", "5 Guerreiros invocados com estilo Duolingo!", "🪄");
+    window.showCustomAlert("Mágica Concluída", "5 novos jogadores foram adicionados à mesa!", "🪄");
 };
 
 window.updateGameAvailability = function() {
@@ -1850,34 +1948,42 @@ appCore.sortearMinigame = function() {
         if (eligible.length > 0) pool = eligible;
     }
 
+    const cards = document.querySelectorAll('.game-grid-card');
     let ticks = 0;
-    const maxTicks = 8;
+    const maxTicks = 12;
     const tickInterval = setInterval(() => {
-        appCore.showcaseIdx = (appCore.showcaseIdx + 1) % list.length;
-        appCore.renderShowcaseCard(1);
+        if (cards.length > 0) {
+            cards.forEach(c => c.style.borderColor = 'rgba(255,255,255,0.08)');
+            const randomCard = cards[Math.floor(Math.random() * cards.length)];
+            randomCard.style.borderColor = '#818cf8';
+        }
         window.playSound('pop');
         window.hapticTap();
         ticks++;
+
         if (ticks >= maxTicks) {
             clearInterval(tickInterval);
+            if (cards.length > 0) {
+                cards.forEach(c => c.style.borderColor = 'rgba(255,255,255,0.08)');
+            }
             const chosen = pool[Math.floor(Math.random() * pool.length)];
-            appCore.showcaseIdx = list.findIndex(g => g.id === chosen.id);
-            appCore.renderShowcaseCard(1);
 
             window.playSound('victory');
-            window.GIW.bus.emit('fx:juice', { type: 'confetti', particleCount: 75 });
-            
+            if (window.GIW && window.GIW.bus) {
+                window.GIW.bus.emit('fx:juice', { type: 'confetti', particleCount: 75 });
+            }
+
             window.showCustomAlert(
-                '🎰 Minigame Sorteado!',
-                `A roleta parou em:\n<b style="font-size:1.35em; color:var(--pop-yellow);">${chosen.title.toUpperCase()}</b>!\n\nEntrando no lobby da rodada...`,
+                '🎰 Minigame Sorteado',
+                `O jogo sorteado para esta rodada foi:<br><b style="font-size:1.35em; color:var(--pop-yellow); display:inline-block; margin:6px 0;">${chosen.title.toUpperCase()}</b><br>Entrando na sala da rodada...`,
                 '🎲'
             );
             setTimeout(() => {
-                appCore.closeModal('alert-modal');
+                appCore.closeModal('custom-alert-modal');
                 appCore.openGameLobby(chosen.id);
             }, 1300);
         }
-    }, 80);
+    }, 70);
 };
 
 appCore.openGameLobby = function(gameId) {
@@ -1886,21 +1992,22 @@ appCore.openGameLobby = function(gameId) {
     if (store.players.length < min) {
         if (store.players.length === 0) {
             appCore.abrirCriador();
-            return window.showCustomAlert('Faltam Guerreiros', `Este minigame exige no mínimo ${min} jogadores na mesa. Forje o primeiro guerreiro agora!`, '🛡️');
+            return window.showCustomAlert('Falta Gente!', `Esse minigame precisa de pelo menos ${min} jogadores na mesa. Adicione alguém para começar!`, '👥');
         } else {
             appCore.nav('screen-players');
-            return window.showCustomAlert('Faltam Guerreiros', `Este minigame exige ${min} guerreiros (você tem ${store.players.length}). Crie mais ${min - store.players.length} ou use a Mágica 🪄!`, '👥');
+            return window.showCustomAlert('Falta Gente!', `Esse minigame precisa de ${min} jogadores (a mesa tem ${store.players.length}). Adicione mais ${min - store.players.length} ou use a Mágica 🪄!`, '👥');
         }
     }
 
     store.currentGameActive = gameId;
-    store.isBetting = false;
-    const btnAposta = document.getElementById('btn-lobby-aposta');
-    if (btnAposta) {
-        btnAposta.innerText = '🎲 Aposta de Sangue (Desligada)';
-        btnAposta.style.color = 'var(--pop-cyan)';
+    const lobbyTitle = document.getElementById('lobby-title');
+    if (lobbyTitle) {
+        if (store.tournamentMode) {
+            lobbyTitle.innerHTML = `<span style="font-size:0.65em; color:var(--pop-yellow); display:block; letter-spacing:1px; margin-bottom:2px;">🏆 TORNEIO • RODADA ${store.tourneyCurrentRound + 1}/${store.tourneyMaxRounds}</span>${(window.gameTitles[gameId] || gameId).toUpperCase()}`;
+        } else {
+            lobbyTitle.innerText = (window.gameTitles[gameId] || gameId).toUpperCase();
+        }
     }
-    document.getElementById('lobby-title').innerText = (window.gameTitles[gameId] || gameId).toUpperCase();
     store.gameConfigs.themes = [];
     appCore.renderLobbySettings(gameId);
 
@@ -1934,36 +2041,22 @@ appCore.showGameRules = function(gameId) {
     const badgeEl = document.getElementById('rm-badge');
     const taglineEl = document.getElementById('rm-tagline');
     const stepsCont = document.getElementById('rm-steps-container');
-    const goldenText = document.getElementById('rm-golden-text');
-    const rolesBox = document.getElementById('rm-roles-box');
-    const rolesText = document.getElementById('rm-roles-text');
 
     if (titleEl) titleEl.innerText = window.gameTitles[gid] || gid;
     if (iconEl) iconEl.innerText = guide.icon || '🎮';
     if (badgeEl) badgeEl.innerText = guide.minPlayers || 'Todos';
-    if (taglineEl) taglineEl.innerText = `"${guide.tagline}"`;
+    if (taglineEl) taglineEl.innerText = guide.tagline || '';
 
     if (stepsCont) {
         stepsCont.innerHTML = guide.steps.map((st, i) => `
-            <div class="rule-step-card">
-                <div class="rule-step-num">${i + 1}</div>
-                <div class="rule-step-body">
-                    <div class="rule-step-title">${st.title}</div>
-                    <div class="rule-step-desc">${st.desc}</div>
+            <div class="rule-step-card" style="display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 14px;">
+                <div class="rule-step-num" style="width: 26px; height: 26px; border-radius: 50%; background: rgba(99,102,241,0.2); border: 1px solid rgba(99,102,241,0.4); color: #818cf8; font-size: 0.8rem; font-weight: 800; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 2px;">${i + 1}</div>
+                <div class="rule-step-body" style="flex: 1;">
+                    <div class="rule-step-title" style="font-size: 0.9rem; font-weight: 700; color: #fff; margin-bottom: 2px;">${st.title}</div>
+                    <div class="rule-step-desc" style="font-size: 0.8rem; color: rgba(255,255,255,0.65); line-height: 1.35;">${st.desc}</div>
                 </div>
             </div>
         `).join('');
-    }
-
-    if (goldenText) goldenText.innerText = guide.goldenRule || 'Foque no objetivo e divirta-se com a mesa!';
-
-    if (rolesBox && rolesText) {
-        if (guide.rolesInfo && (store.isRoles ?? true)) {
-            rolesBox.style.display = 'block';
-            rolesText.innerText = guide.rolesInfo;
-        } else {
-            rolesBox.style.display = 'none';
-        }
     }
 
     appCore.openModal('rules-modal');
@@ -1979,58 +2072,242 @@ appCore.toggleModifier = function(key, el) {
     window.renderPlayers();
 };
 
-appCore.toggleAposta = function() {
-    store.isBetting = !store.isBetting;
-    const btn = document.getElementById('btn-lobby-aposta');
-    if (btn) {
-        btn.innerText = store.isBetting ? '🎲 Aposta de Sangue (ATIVADA!)' : '🎲 Aposta de Sangue (Desligada)';
-        btn.style.color = store.isBetting ? 'var(--pop-yellow)' : 'var(--pop-cyan)';
+appCore.selectSegment = function(inputId, value, btnEl) {
+    const input = document.getElementById(inputId);
+    if (input) input.value = value;
+
+    if (btnEl && btnEl.parentElement) {
+        const btns = btnEl.parentElement.querySelectorAll('.segment-btn');
+        btns.forEach(b => b.classList.remove('active'));
+        btnEl.classList.add('active');
     }
-    if (store.isBetting) window.showCustomAlert("Aposta de Sangue!", "Quem perder nesta rodada sofrerá -10 Pts e levará um Castigo da Mesa!", "🎲");
+
+    window.hapticTap();
+    window.playSound('pop');
+};
+
+appCore.toggleLobbyRole = function(key, btnEl, label) {
+    store[key] = !store[key];
+    store.save();
+    window.hapticTap();
+    window.playSound('pop');
+    if (btnEl) {
+        const isYellow = label.includes('Bobo');
+        const colorVar = isYellow ? 'var(--pop-yellow)' : 'var(--pop-magenta)';
+        const bgVar = isYellow ? 'rgba(255,230,0,0.15)' : 'rgba(255,42,133,0.15)';
+        btnEl.style.background = store[key] ? bgVar : 'rgba(255,255,255,0.04)';
+        btnEl.style.borderColor = store[key] ? colorVar : 'rgba(255,255,255,0.08)';
+        btnEl.style.color = store[key] ? colorVar : '#fff';
+        btnEl.innerHTML = `<span>${label}</span><span style="font-size:0.8em; font-weight:900;">${store[key] ? 'LIGADO ✅' : 'DESLIGADO ✕'}</span>`;
+    }
+    const tRoles = document.getElementById('t-roles');
+    if (tRoles) tRoles.classList.toggle('active', store[key]);
+};
+
+appCore.stepLobbyConfig = function(prop, delta) {
+    if (!store.gameConfigs) store.gameConfigs = {};
+    if (typeof store.gameConfigs[prop] !== 'number') store.gameConfigs[prop] = 1;
+    let max = Math.max(1, Math.floor((store.players.length || 4) / 2));
+    store.gameConfigs[prop] = Math.max(1, Math.min(max, store.gameConfigs[prop] + delta));
+    const el = document.getElementById('val-lobby-impostores');
+    if (el) el.innerText = store.gameConfigs[prop];
+    appCore.updateLobbySettingsBadge(store.currentGameActive);
+    window.playSound('pop');
+    window.hapticTap();
+};
+
+appCore.setLobbyRoleValue = function(key, val) {
+    store[key] = val;
+    appCore.renderLobbySettings(store.currentGameActive);
+    window.playSound('pop');
+    window.hapticTap();
+};
+
+appCore.updateLobbySettingsBadge = function(gameId) {
+    const badge = document.getElementById('lobby-settings-badge');
+    if (!badge) return;
+    if (gameId === 'impostor') {
+        const imp = store.gameConfigs.impostorCount || 1;
+        const bobo = store.isRoles ? 'Bobo ON' : 'Bobo OFF';
+        badge.innerText = `${imp} Impostor${imp > 1 ? 'es' : ''} • ${bobo}`;
+    } else if (gameId === 'posicao') {
+        badge.innerText = store.isRoles ? 'Sabotador Ativado' : 'Modo Clássico';
+    } else if (gameId === 'batata') {
+        const sens = store.gameConfigs.sens === 15 ? 'Alta' : store.gameConfigs.sens === 35 ? 'Baixa' : 'Normal';
+        badge.innerText = `Sensor ${sens}`;
+    } else if (['mimica', 'completa'].includes(gameId)) {
+        const t = document.getElementById('config-time')?.value || 60;
+        badge.innerText = `Tempo: ${t}s`;
+    } else {
+        badge.innerText = 'Configurar ➔';
+    }
 };
 
 appCore.renderLobbySettings = function(gameId) {
     const box = document.getElementById('game-specific-configs');
+    const btnRow = document.getElementById('lobby-settings-btn-row');
+    const navBtn = document.getElementById('btn-lobby-settings-nav');
+    if (!box) return;
     box.innerHTML = '';
     let html = '';
 
-    const needsThemes = ['impostor', 'duplas', 'megasenha', 'completa', 'mimica', 'unica', 'quemsoueu'];
+    const needsThemes = ['impostor', 'megasenha', 'completa', 'unica', 'quemsoueu'];
     if (needsThemes.includes(gameId)) {
         appCore.renderThemesModal();
-        html += `<button class="btn btn-dark" style="margin-bottom:12px;" onclick="appCore.openModal('themes-modal')">🏷️ Escolher Temas da Partida</button>`;
+        const themesCount = (store.gameConfigs.themes && store.gameConfigs.themes.length) ? store.gameConfigs.themes.length : 0;
+        const themesDesc = themesCount > 0 ? `${themesCount} categorias ativas` : 'Todas as categorias liberadas';
+        html += `
+            <div class="studio-card-setting" style="cursor:pointer;" onclick="appCore.openModal('themes-modal')">
+                <div style="flex:1;">
+                    <div class="studio-card-title">🏷️ TEMAS DA PARTIDA</div>
+                    <div class="studio-card-desc">${themesDesc}</div>
+                </div>
+                <div style="font-size:1.1rem; padding: 6px 14px; background: rgba(255,255,255,0.08); border-radius: 999px; font-weight:800;">EDITAR ➔</div>
+            </div>
+        `;
     }
 
     if (gameId === 'impostor') {
-        html += `<div style="font-size:0.85em; font-weight:900; margin-bottom:4px; text-transform:uppercase;">Tempo de Discussão</div><select id="config-time" class="brutal-input"><option value="120">2 Minutos</option><option value="240" selected>4 Minutos</option><option value="360">6 Minutos</option></select>`;
+        const impCount = store.gameConfigs.impostorCount || 1;
+        html += `
+            <div class="studio-card-setting">
+                <div style="flex:1;">
+                    <div class="studio-card-title">IMPOSTORES</div>
+                    <div class="studio-card-desc">Número de sabotadores na mesa</div>
+                </div>
+                <div class="studio-stepper-wrap">
+                    <button type="button" class="studio-stepper-btn" onclick="appCore.stepLobbyConfig('impostorCount', -1)">−</button>
+                    <div class="studio-stepper-value" id="val-lobby-impostores">${impCount}</div>
+                    <button type="button" class="studio-stepper-btn" onclick="appCore.stepLobbyConfig('impostorCount', 1)">+</button>
+                </div>
+            </div>
+
+            <div class="studio-card-setting">
+                <div style="flex:1;">
+                    <div class="studio-card-title">BOBO DA CORTE</div>
+                    <div class="studio-card-desc">Ele vence se for eliminado no tribunal</div>
+                </div>
+                <div class="studio-segmented-pill">
+                    <button type="button" class="studio-segmented-opt ${!store.isRoles ? 'active' : ''}" onclick="appCore.setLobbyRoleValue('isRoles', false)">Desativado</button>
+                    <button type="button" class="studio-segmented-opt ${store.isRoles ? 'active' : ''}" onclick="appCore.setLobbyRoleValue('isRoles', true)">Ativado</button>
+                </div>
+            </div>
+
+            <div class="studio-card-setting">
+                <div style="flex:1;">
+                    <div class="studio-card-title">TEMPO DE DISCUSSÃO</div>
+                    <div class="studio-card-desc">Cronômetro para debates antes da votação</div>
+                </div>
+                <div class="studio-segmented-pill" id="ctrl-config-time">
+                    <button type="button" class="studio-segmented-opt" onclick="appCore.selectSegment('config-time', 120, this)">2 Min</button>
+                    <button type="button" class="studio-segmented-opt active" onclick="appCore.selectSegment('config-time', 240, this)">4 Min</button>
+                    <button type="button" class="studio-segmented-opt" onclick="appCore.selectSegment('config-time', 360, this)">6 Min</button>
+                </div>
+                <input type="hidden" id="config-time" value="240">
+            </div>
+        `;
+    } else if (gameId === 'posicao') {
+        html += `
+            <div class="studio-card-setting">
+                <div style="flex:1;">
+                    <div class="studio-card-title">PAPEL SABOTADOR</div>
+                    <div class="studio-card-desc">Um infiltrado que tenta sabotar a ordem</div>
+                </div>
+                <div class="studio-segmented-pill">
+                    <button type="button" class="studio-segmented-opt ${!store.isRoles ? 'active' : ''}" onclick="appCore.setLobbyRoleValue('isRoles', false)">Desativado</button>
+                    <button type="button" class="studio-segmented-opt ${store.isRoles ? 'active' : ''}" onclick="appCore.setLobbyRoleValue('isRoles', true)">Ativado</button>
+                </div>
+            </div>
+        `;
     } else if (gameId === 'batata') {
-        html += `<div style="font-size:0.85em; font-weight:900; margin-bottom:4px; text-transform:uppercase;">Sensibilidade do Sensor</div><select id="config-sens" class="brutal-input"><option value="35">Baixa (Menos estouros)</option><option value="25" selected>Normal</option><option value="15">Alta (Qualquer tremor explode!)</option></select>`;
-    } else if (['mimica', 'sevira', 'megasenha', 'completa'].includes(gameId)) {
-        html += `<div style="font-size:0.85em; font-weight:900; margin-bottom:4px; text-transform:uppercase;">Tempo da Rodada</div><select id="config-time" class="brutal-input"><option value="30">30 Segundos</option><option value="45">45 Segundos</option><option value="60" selected>60 Segundos</option></select>`;
+        html += `
+            <div class="studio-card-setting">
+                <div style="flex:1;">
+                    <div class="studio-card-title">SENSIBILIDADE DA BOMBA</div>
+                    <div class="studio-card-desc">Gatilho de movimento e trepidação</div>
+                </div>
+                <div class="studio-segmented-pill" id="ctrl-config-sens">
+                    <button type="button" class="studio-segmented-opt" onclick="appCore.selectSegment('config-sens', 35, this)">Baixa</button>
+                    <button type="button" class="studio-segmented-opt active" onclick="appCore.selectSegment('config-sens', 25, this)">Normal</button>
+                    <button type="button" class="studio-segmented-opt" onclick="appCore.selectSegment('config-sens', 15, this)">Alta ⚡</button>
+                </div>
+                <input type="hidden" id="config-sens" value="25">
+            </div>
+        `;
+    } else if (['mimica', 'completa'].includes(gameId)) {
+        html += `
+            <div class="studio-card-setting">
+                <div style="flex:1;">
+                    <div class="studio-card-title">TEMPO DA RODADA</div>
+                    <div class="studio-card-desc">Duração para a equipe pontuar</div>
+                </div>
+                <div class="studio-segmented-pill" id="ctrl-config-time">
+                    <button type="button" class="studio-segmented-opt" onclick="appCore.selectSegment('config-time', 30, this)">30s</button>
+                    <button type="button" class="studio-segmented-opt" onclick="appCore.selectSegment('config-time', 45, this)">45s</button>
+                    <button type="button" class="studio-segmented-opt active" onclick="appCore.selectSegment('config-time', 60, this)">60s</button>
+                </div>
+                <input type="hidden" id="config-time" value="60">
+            </div>
+        `;
     }
 
-    box.style.display = html ? 'block' : 'none';
+    box.style.display = html ? 'flex' : 'none';
+    box.style.flexDirection = 'column';
+    box.style.gap = '12px';
     box.innerHTML = html;
+
+    const hasConfigs = !!html;
+    if (btnRow) btnRow.style.display = hasConfigs ? 'block' : 'none';
+    if (navBtn) navBtn.style.display = hasConfigs ? 'flex' : 'none';
+    if (hasConfigs) appCore.updateLobbySettingsBadge(gameId);
+
+    const lblCount = document.getElementById('lobby-player-count-label');
+    if (lblCount) {
+        lblCount.innerText = `${store.players.length} JOGADORES`;
+    }
 };
 
 appCore.renderThemesModal = function() {
     const c = document.getElementById('themes-modal-container');
     if (!c) return;
-    c.innerHTML = '';
-    Object.keys(window.categoriasIniciais).forEach(cat => {
-        const isSel = store.gameConfigs.themes.includes(cat);
-        c.innerHTML += `<button class="chip ${isSel ? 'on' : ''}" onclick="appCore.toggleTheme('${cat}', this)">${cat}</button>`;
+    c.className = 'themes-grid-studio';
+    const icons = {
+        'Geral': '🎲', 'Cinema': '🎬', 'Geografia': '🌍', 'Música': '🎵',
+        'Comidas': '🍕', 'Objetos': '📦', 'Profissões': '💼', 'Esportes': '⚽',
+        'Animais': '🦁', 'Séries': '📺', 'Tecnologia': '💻', 'Jogos': '🎮',
+        'Marcas': '🏷️', 'História': '📜', 'Ciência': '🔬', 'Desenhos': '🎨'
+    };
+    const cats = Object.keys(window.categoriasIniciais || {});
+    let html = '';
+    cats.forEach(cat => {
+        const isSel = (store.gameConfigs.themes || []).includes(cat);
+        const icon = icons[cat] || '🏷️';
+        html += `
+            <div class="theme-card-studio ${isSel ? 'is-active' : ''}" onclick="appCore.toggleTheme('${cat}', this)">
+                <div class="theme-name"><span>${icon}</span> <span>${cat}</span></div>
+                <div class="theme-check">✓</div>
+            </div>
+        `;
     });
+    c.innerHTML = html;
 };
 
 appCore.toggleTheme = function(cat, el) {
+    if (!store.gameConfigs.themes) store.gameConfigs.themes = [];
     if (store.gameConfigs.themes.includes(cat)) {
         store.gameConfigs.themes = store.gameConfigs.themes.filter(x => x !== cat);
-        el.classList.remove('on');
+        el.classList.remove('is-active');
     } else {
         store.gameConfigs.themes.push(cat);
-        el.classList.add('on');
-        el.classList.add('pop');
-        setTimeout(() => el.classList.remove('pop'), 300);
+        el.classList.add('is-active');
+        if (typeof window.gsap !== 'undefined') {
+            window.gsap.fromTo(el, { scale: 0.95 }, { scale: 1, duration: 0.18, ease: 'back.out(2)' });
+        }
+    }
+    const sum = document.getElementById('lobby-themes-summary');
+    if (sum) {
+        const cnt = store.gameConfigs.themes.length;
+        sum.innerText = cnt > 0 ? `${cnt} categorias ativas` : 'Todas as categorias liberadas';
     }
     window.playSound('pop');
     window.hapticTap();
@@ -2038,30 +2315,38 @@ appCore.toggleTheme = function(cat, el) {
 
 let selectedSwap = null;
 appCore.setupLobbyTeams = function(gameId) {
-    const reqSize = (gameId === 'completa') ? 3 : (['megasenha', 'nota'].includes(gameId)) ? 2 : 1;
     const shuf = [...store.players].sort(() => Math.random() - 0.5);
     store.teams = [];
     store.bench = [];
 
-    if (gameId === 'quemsoueu' && shuf.length >= 2) {
-        store.teams.push({ id: 0, players: [shuf[0]], score: 0 });
-        store.teams.push({ id: 1, players: [shuf[1]], score: 0 });
-        store.bench = shuf.slice(2);
-    } else if (gameId === 'megasenha') {
-        store.teams.push({ id: 0, players: shuf.slice(0, 2), score: 0 });
-        store.teams.push({ id: 1, players: shuf.slice(2, 4), score: 0 });
+    if (gameId === 'quemsoueu') {
+        store.teams.push({ id: 0, name: '👥 Equipe 1', players: shuf.slice(0, 2), score: 0 });
+        store.teams.push({ id: 1, name: '👥 Equipe 2', players: shuf.slice(2, 4), score: 0 });
         store.bench = shuf.slice(4);
-    } else if (reqSize > 1) {
-        let nt = Math.floor(shuf.length / reqSize);
+    } else if (gameId === 'nota') {
+        store.teams.push({ id: 0, name: '🎯 Dupla 1 (Avaliador + Adivinhador)', players: shuf.slice(0, 2), score: 0 });
+        store.teams.push({ id: 1, name: '🎯 Dupla 2 (Avaliador + Adivinhador)', players: shuf.slice(2, 4), score: 0 });
+        store.bench = shuf.slice(4);
+    } else if (gameId === 'megasenha') {
+        store.teams.push({ id: 0, name: '👥 Time 1', players: shuf.slice(0, 2), score: 0 });
+        store.teams.push({ id: 1, name: '👥 Time 2', players: shuf.slice(2, 4), score: 0 });
+        store.bench = shuf.slice(4);
+    } else if (gameId === 'unica') {
+        // Indica claramente no lobby quem adivinha e quem dá dicas
+        store.teams.push({ id: 0, name: '🎯 Adivinhador (Quem vai adivinhar)', players: [shuf[0]], score: 0 });
+        store.teams.push({ id: 1, name: '✍️ Dão as Dicas (Resto da Mesa)', players: shuf.slice(1), score: 0 });
+        store.bench = [];
+    } else if (gameId === 'completa') {
+        let nt = Math.floor(shuf.length / 3);
         if (nt === 0) nt = 1;
         let idx = 0;
         for (let i = 0; i < nt; i++) {
-            store.teams.push({ id: i, players: shuf.slice(idx, idx + reqSize), score: 0 });
-            idx += reqSize;
+            store.teams.push({ id: i, name: `👥 Equipe ${i + 1}`, players: shuf.slice(idx, idx + 3), score: 0 });
+            idx += 3;
         }
         store.bench = shuf.slice(idx);
     } else {
-        store.teams.push({ id: 0, players: shuf, score: 0 });
+        store.teams.push({ id: 0, name: 'Jogadores Titulares', players: shuf, score: 0 });
     }
     window.renderLobbyTeams();
 };
@@ -2084,8 +2369,8 @@ window.clickSwapTarget = function(tId, pIdx, isBench) {
 window.renderLobbyTeams = function() {
     const c = document.getElementById('lobby-teams-container');
     if (!c) return;
-    c.innerHTML = '';
 
+    let html = '';
     store.teams.forEach(t => {
         const pHTML = t.players.map((p, pIdx) => {
             const isSel = selectedSwap && !selectedSwap.isBench && selectedSwap.tId === t.id && selectedSwap.pIdx === pIdx;
@@ -2096,9 +2381,9 @@ window.renderLobbyTeams = function() {
             `;
         }).join('');
 
-        c.innerHTML += `
+        html += `
             <div style="background:var(--bg-surface); border-radius:18px; padding:14px; border:var(--border-brutal-sm); box-shadow:var(--shadow-brutal-sm);">
-                <div style="color:var(--ink-white); font-weight:900; margin-bottom:8px;">${store.teams.length > 1 ? `Equipe ${t.id + 1}` : 'Guerreiros Titulares'}</div>
+                <div style="color:var(--ink-white); font-weight:900; margin-bottom:8px;">${t.name || (store.teams.length > 1 ? `Equipe ${t.id + 1}` : 'Jogadores Titulares')}</div>
                 <div style="display:flex; flex-wrap:wrap; gap:8px;">${pHTML}</div>
             </div>
         `;
@@ -2114,45 +2399,15 @@ window.renderLobbyTeams = function() {
             `;
         }).join('');
 
-        c.innerHTML += `
+        html += `
             <div style="background:var(--bg-surface-elevated); border-radius:18px; padding:14px; border:2px dashed var(--pop-magenta);">
-                <div style="color:var(--pop-magenta); font-weight:900; margin-bottom:8px;">Guerreiros na Reserva</div>
+                <div style="color:var(--pop-magenta); font-weight:900; margin-bottom:8px;">Na Reserva / Próximos da Fila</div>
                 <div style="display:flex; flex-wrap:wrap; gap:8px;">${bHTML}</div>
             </div>
         `;
     }
-};
 
-appCore.atualizarLojaNegra = function() {
-    const runner = window.GIW.runner;
-    const activeGame = runner?.activeGame;
-    let balance = 0;
-    let name = "Arena Geral";
-
-    if (activeGame && activeGame.teamScores) {
-        const tid = activeGame.activeTeam || 0;
-        balance = activeGame.teamScores[tid] || 0;
-        name = `Equipe ${tid + 1}`;
-    } else if (activeGame && typeof activeGame.score === 'number') {
-        balance = activeGame.score;
-        name = activeGame.players?.[0]?.name || "Jogador Ativo";
-    } else {
-        const p = activeGame?.players?.[0] || store.players[0];
-        balance = p?.score || 0;
-        name = p?.name || "Guerreiro";
-    }
-
-    const info = document.getElementById('store-team-info');
-    if (info) info.innerText = `${name} | Saldo: ${balance} Pts`;
-
-    // Atualiza visual de preços com desconto de 50% se Mario Kart estiver ativo
-    const mk = store.isMarioKart;
-    const cMordaca = document.getElementById('store-cost-mordaca');
-    if (cMordaca) cMordaca.innerText = mk ? '-15 Pts (MK!)' : '-30 Pts';
-    const cTempo = document.getElementById('store-cost-tempo');
-    if (cTempo) cTempo.innerText = mk ? '-20 Pts (MK!)' : '-40 Pts';
-    const cVoz = document.getElementById('store-cost-voz');
-    if (cVoz) cVoz.innerText = mk ? '-25 Pts (MK!)' : '-50 Pts';
+    c.innerHTML = html;
 };
 
 // ==========================================
@@ -2164,7 +2419,7 @@ appCore.dispararPrenda = function(player) {
     const pool = store.isChaos ? [...window.prendasLista, ...window.prendasCaos] : window.prendasLista;
     const chosen = pool[Math.floor(Math.random() * pool.length)];
 
-    document.getElementById('prenda-player-name').innerText = `💥 ${player.name} foi Punido(a)!`;
+    document.getElementById('prenda-player-name').innerText = `💥 ${player.name} levou um Castigo!`;
     document.getElementById('prenda-card-title').innerText = chosen.t;
     document.getElementById('prenda-card-desc').innerText = chosen.d;
 
@@ -2189,71 +2444,191 @@ appCore.concluirPrenda = function() {
 // 11. TORNEIO, ROLETA & DESEMPATE
 // ==========================================
 appCore.openTourneySetup = function() {
-    if (store.players.length < 3) {
+    window.hapticTap();
+    window.playSound('nav');
+    if (store.players.length < 2) {
         appCore.nav('screen-players');
-        return window.showCustomAlert('Aviso', 'O Torneio exige pelo menos 3 guerreiros forjados!', '🏆');
+        return window.showCustomAlert('Cadê a Galera?', 'O Torneio precisa de pelo menos 2 jogadores na mesa!', '👥');
     }
-    const c = document.getElementById('tourney-games-list');
-    if (c) {
-        c.innerHTML = '';
-        Object.keys(window.gameTitles).forEach(gid => {
-            c.innerHTML += `<button class="btn btn-warning btn-sm" style="width:auto;" id="chk-${gid}" onclick="this.classList.toggle('btn-dark'); this.classList.toggle('btn-warning'); window.hapticTap();">${window.gameTitles[gid]}</button>`;
-        });
-    }
+    appCore.renderTourneyRoster();
+    appCore.updateTourneyCTA();
     appCore.nav('screen-tourney-setup');
 };
 
+appCore.renderTourneyRoster = function() {
+    const countEl = document.getElementById('tourney-roster-count');
+    const shelfEl = document.getElementById('tourney-roster-shelf');
+    if (countEl) countEl.innerText = store.players.length;
+    if (shelfEl) {
+        shelfEl.innerHTML = store.players.map(p => `
+            <div class="tourney-roster-pill">
+                <img src="${p.avatarUrl}" style="width:22px; height:22px; border-radius:50%; border:1px solid #000; background:${p.avatarBg || '#ffc300'};">
+                <span>${p.name}</span>
+                <span style="color:var(--pop-yellow); font-size:0.85em;">(${p.score || 0} pts)</span>
+            </div>
+        `).join('');
+    }
+};
+
+appCore.selectTourneyPreset = function(rounds, el) {
+    window.hapticTap();
+    window.playSound('pop');
+    store.tourneyMaxRounds = rounds;
+    document.querySelectorAll('.tourney-preset-card').forEach(c => c.classList.remove('active'));
+    if (el) el.classList.add('active');
+    appCore.updateTourneyCTA();
+};
+
+appCore.selectTourneyMode = function(mode, el) {
+    window.hapticTap();
+    window.playSound('pop');
+    store.tourneyCuratedMode = mode;
+    document.querySelectorAll('.tourney-mode-chip').forEach(c => c.classList.remove('active'));
+    if (el) el.classList.add('active');
+};
+
+appCore.updateTourneyCTA = function() {
+    const btn = document.getElementById('btn-start-tourney-cta');
+    if (btn) {
+        btn.innerText = `🚀 INICIAR TORNEIO (${store.tourneyMaxRounds} JOGOS)`;
+    }
+};
+
 appCore.startTourney = function() {
-    store.tourneyAllowedGames = [];
-    Object.keys(window.gameTitles).forEach(gid => {
-        const el = document.getElementById(`chk-${gid}`);
-        if (el && el.classList.contains('btn-warning')) store.tourneyAllowedGames.push(gid);
-    });
-    if (store.tourneyAllowedGames.length === 0) return window.showCustomAlert("Atenção", "Selecione ao menos 1 minigame para a roleta!");
-    store.tourneyTarget = parseInt(document.getElementById('tourney-target').value, 10) || 100;
+    if (store.players.length < 2) {
+        return window.showCustomAlert('Cadê a Galera?', 'Precisa de pelo menos 2 jogadores para iniciar o torneio!', '👥');
+    }
+
     store.tournamentMode = true;
-    store.tourneyPool = [...store.tourneyAllowedGames].sort(() => Math.random() - 0.5);
+    store.tourneyType = 'rounds';
+    store.tourneyCurrentRound = 0;
+
+    const allGames = Object.keys(window.gameTitles || {});
+    const categories = {
+        strategy: ['impostor', 'macabro'],
+        mind: ['posicao', 'unica', 'quemsoueu'],
+        team: ['duplas', 'megasenha', 'nota', 'completa', 'mimica'],
+        adrenaline: ['reacao', 'stop', 'sevira', 'batata', 'ultimo']
+    };
+
+    if (store.tourneyCuratedMode === 'balanced') {
+        let pool = [];
+        const catKeys = Object.keys(categories).sort(() => Math.random() - 0.5);
+        catKeys.forEach(cat => {
+            const list = categories[cat].filter(g => allGames.includes(g));
+            if (list.length > 0) pool.push(list[Math.floor(Math.random() * list.length)]);
+        });
+        const remainingAll = allGames.filter(g => !pool.includes(g)).sort(() => Math.random() - 0.5);
+        while (pool.length < store.tourneyMaxRounds && remainingAll.length > 0) {
+            pool.push(remainingAll.pop());
+        }
+        store.tourneyAllowedGames = pool.slice(0, store.tourneyMaxRounds);
+    } else {
+        store.tourneyAllowedGames = [...allGames].sort(() => Math.random() - 0.5).slice(0, store.tourneyMaxRounds);
+    }
+
+    store.tourneyPool = [...store.tourneyAllowedGames].reverse();
+    window.playSound('victory');
+    window.hapticTap();
     window.playTournamentNext();
 };
 
+let currentSpinTween = null;
+
+window.skipTournamentSpin = function() {
+    if (currentSpinTween) {
+        currentSpinTween.kill();
+        currentSpinTween = null;
+    }
+    const nextGame = store.currentGameActive;
+    if (nextGame) {
+        window.playSound('pop');
+        window.hapticTap();
+        appCore.openGameLobby(nextGame);
+    }
+};
+
 window.playTournamentNext = function() {
-    if (store.tourneyPool.length === 0) store.tourneyPool = [...store.tourneyAllowedGames].sort(() => Math.random() - 0.5);
+    if (store.isTourneyOver() || store.tourneyPool.length === 0) {
+        return appCore.encerrarNoite();
+    }
+
     const nextGame = store.tourneyPool.pop();
+    store.currentGameActive = nextGame;
     appCore.nav('screen-tourney-spin');
+
+    const ind = document.getElementById('tourney-spin-indicator');
+    if (ind) {
+        ind.innerHTML = `<span>⚡</span> RODADA ${store.tourneyCurrentRound + 1} DE ${store.tourneyMaxRounds}`;
+    }
 
     const track = document.getElementById('roulette-track');
     if (!track) return;
     track.innerHTML = '';
+    if (typeof window.gsap !== 'undefined') {
+        window.gsap.set(track, { x: 0 });
+    } else {
+        track.style.transform = 'translateX(0px)';
+    }
 
+    const all = Object.keys(window.gameTitles || {});
     const spinItems = [];
-    for (let i = 0; i < 20; i++) spinItems.push(store.tourneyAllowedGames[Math.floor(Math.random() * store.tourneyAllowedGames.length)]);
+    for (let i = 0; i < 16; i++) spinItems.push(all[Math.floor(Math.random() * all.length)]);
     spinItems.push(nextGame);
-    for (let i = 0; i < 8; i++) spinItems.push(store.tourneyAllowedGames[Math.floor(Math.random() * store.tourneyAllowedGames.length)]);
+    for (let i = 0; i < 8; i++) spinItems.push(all[Math.floor(Math.random() * all.length)]);
+
+    const itemWidth = 176; // 160px width + 16px horizontal margin
 
     spinItems.forEach((g, idx) => {
-        const isTarget = idx === 20;
-        track.innerHTML += `<div id="${isTarget ? 'roleta-alvo' : ''}" style="font-size:1.8em; font-weight:900; color:white; padding:0 35px; display:flex; align-items:center;">${window.gameTitles[g]}</div>`;
+        const isTarget = idx === 16;
+        const icon = window.gameGuides[g]?.icon || '🎮';
+        const title = window.gameTitles[g] || g;
+        track.innerHTML += `
+            <div id="${isTarget ? 'roleta-alvo' : ''}" class="roulette-card ${isTarget ? 'is-target' : ''}">
+                <div class="roulette-card-icon">${icon}</div>
+                <div class="roulette-card-name">${title}</div>
+            </div>
+        `;
     });
 
     setTimeout(() => {
         const alvo = document.getElementById('roleta-alvo');
         if (!alvo) return;
         const targetMove = -(alvo.offsetLeft + (alvo.offsetWidth / 2));
+        let lastTickCard = -1;
+
         if (typeof window.gsap !== 'undefined') {
-            window.gsap.to(track, {
+            if (currentSpinTween) currentSpinTween.kill();
+
+            currentSpinTween = window.gsap.to(track, {
                 x: targetMove,
-                duration: 4.2,
-                ease: 'power4.out',
-                onUpdate: () => { if (Math.random() < 0.1) window.hapticTap(); },
+                duration: 3.2,
+                ease: 'power3.out',
+                onUpdate: function() {
+                    const currentX = Math.abs(window.gsap.getProperty(track, 'x'));
+                    const cardIdx = Math.floor(currentX / itemWidth);
+                    if (cardIdx !== lastTickCard) {
+                        lastTickCard = cardIdx;
+                        window.playSound('tick');
+                        if (Math.random() < 0.2) window.hapticTap();
+                    }
+                },
                 onComplete: () => {
-                    window.playKaboom();
-                    window.vibrar(700);
-                    window.gsap.fromTo(alvo, { scale: 1 }, { scale: 1.3, color: 'var(--pop-yellow)', duration: 0.3, yoyo: true, repeat: 3 });
-                    setTimeout(() => appCore.openGameLobby(nextGame), 2200);
+                    currentSpinTween = null;
+                    window.playSound('victory');
+                    window.vibrar(350);
+                    alvo.classList.add('is-selected');
+                    window.gsap.fromTo(alvo, 
+                        { scale: 1 }, 
+                        { scale: 1.14, duration: 0.35, yoyo: true, repeat: 1, ease: 'back.out(2)' }
+                    );
+                    setTimeout(() => appCore.openGameLobby(nextGame), 1100);
                 }
             });
+        } else {
+            setTimeout(() => appCore.openGameLobby(nextGame), 1000);
         }
-    }, 150);
+    }, 120);
 };
 
 // Desempate Seguro (Sem destruição de DOM)
@@ -2261,23 +2636,26 @@ let touchFingers = {}, touchDone = false;
 const touchColors = ['#ffd600', '#00e5ff', '#ff2a85', '#00e676', '#8b5cf6'];
 
 appCore.encerrarNoite = function() {
-    if (store.players.length < 2) return window.showCustomAlert("Aviso", "Precisa de pelo menos 2 guerreiros forjados na mesa para o pódio.");
-    const s = [...store.players].sort((a, b) => b.score - a.score);
+    if (store.players.length < 2) return window.showCustomAlert("Mesa Vazia", "Precisa de pelo menos 2 jogadores cadastrados para abrir a retrospectiva da noite.", "👥");
+    const s = [...store.players].sort((a, b) => (b.score || 0) - (a.score || 0));
     if (s[0].score === s[1].score && s[0].score > 0) {
         appCore.nav('screen-tiebreaker');
     } else {
-        appCore.renderPodio(s);
+        appCore.iniciarRetrospectiva(s);
     }
 };
 
 appCore.runTouchRoleta = function() {
     const existing = document.getElementById('touch-board');
-    if (existing) existing.remove();
+    if (existing) {
+        existing.remove();
+        touchFingers = {};
+    }
 
     const board = document.createElement('div');
     board.id = 'touch-board';
     board.style.cssText = 'position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(9,10,15,0.95); z-index:9999; touch-action:none;';
-    board.innerHTML = `<p id="touch-msg" style="color:white; text-align:center; margin-top:20vh; font-size:1.6em; font-weight:900;">Mantenham o dedo na tela!</p>`;
+    board.innerHTML = `<p id="touch-msg" style="color:white; text-align:center; margin-top:20vh; font-size:1.6em; font-weight:900;">Mantenham os dedos pressionados na tela!</p>`;
     document.body.appendChild(board);
 
     touchFingers = {};
@@ -2306,7 +2684,7 @@ appCore.runTouchRoleta = function() {
                 circle.style.opacity = '0';
             }
         });
-        document.getElementById('touch-msg').innerText = "VENCEDOR DEFINIDO!";
+        document.getElementById('touch-msg').innerText = "VENCEDOR ESCOLHIDO!";
         
         const s = [...store.players].sort((a, b) => b.score - a.score);
         if (s[0]) {
@@ -2315,8 +2693,9 @@ appCore.runTouchRoleta = function() {
         }
 
         setTimeout(() => {
+            touchFingers = {};
             board.remove();
-            appCore.renderPodio();
+            appCore.iniciarRetrospectiva();
         }, 2200);
     };
 
@@ -2384,7 +2763,7 @@ appCore.runOlhares = function() {
         s[0].score = (s[0].score || 0) + 1;
         store.save();
     }
-    setTimeout(() => appCore.renderPodio(), 2800);
+    setTimeout(() => appCore.iniciarRetrospectiva(), 2800);
 };
 
 appCore.renderPodio = function(sSorted) {
@@ -2396,7 +2775,7 @@ appCore.renderPodio = function(sSorted) {
     const s = sSorted || [...store.players].sort((a, b) => b.score - a.score);
     
     // 1º Lugar - Campeão
-    const champ = s[0] || { name: 'Guerreiro', score: 0 };
+    const champ = s[0] || { name: 'Jogador', score: 0 };
     const champAvatarEl = document.getElementById('podio-champ-avatar');
     const champNameEl = document.getElementById('podio-champ-name');
     const champPtsEl = document.getElementById('podio-champ-pts');
@@ -2447,7 +2826,654 @@ appCore.renderPodio = function(sSorted) {
     }
 };
 
-window.showRetrospectiva = appCore.renderPodio;
+// ==========================================
+// 12. RETROSPECTIVA DA NOITE (CINEMATIC WRAPPED)
+// ==========================================
+let retroCurrentSlide = 0;
+const RETRO_TOTAL_SLIDES = 7;
+let retroSlideTimer = null;
+let retroSlideProgressTween = null;
+let retroIsPaused = false;
+let retroAmbientAnimId = null;
+let retroAmbientParticles = [];
+let retroKeyboardBound = false;
+const RETRO_SLIDE_DURATION_SEC = 4.8;
+
+appCore.iniciarRetrospectiva = function(sSorted) {
+    if (store.players.length < 2) {
+        return window.showCustomAlert(
+            "Mesa Vazia",
+            "Adicione pelo menos 2 jogadores para gerar a retrospectiva animada da noite!",
+            "✨"
+        );
+    }
+
+    // Ordenação decrescente por pontuação
+    const s = sSorted || [...store.players].sort((a, b) => (b.score || 0) - (a.score || 0));
+
+    // Navega para a tela fullscreen da Retrospectiva
+    appCore.nav('screen-retrospectiva');
+    if (window.stopTension) window.stopTension();
+
+    // 1. Estatísticas Consolidadas da Sessão
+    const totalPoints = s.reduce((acc, p) => acc + (p.score || 0), 0);
+    const totalBombs = s.reduce((acc, p) => acc + (p.falhas || 0) + (p.stats?.prend || 0), 0);
+    const maxStreak = Math.max(0, ...s.map(p => p.streak || 0));
+    const roundsPlayed = Math.max(
+        store.sessionRounds || 0,
+        store.tourneyCurrentRound || 0,
+        totalPoints > 0 ? Math.max(1, Math.round(totalPoints / 20)) : (s.length > 0 ? 1 : 0)
+    );
+
+    // 2. Destaques & Títulos
+    const champ = s[0] || { name: 'Jogador', score: 0 };
+    const runner2 = s[1] || null;
+    const runner3 = s[2] || null;
+
+    // Saco de Pancadas: maior número de falhas ou prendas
+    const maxPrendas = Math.max(0, ...s.map(p => (p.falhas || 0) + (p.stats?.prend || 0)));
+    const saco = maxPrendas > 0 ? s.find(p => ((p.falhas || 0) + (p.stats?.prend || 0)) === maxPrendas) : null;
+    const sacoTarget = saco || s[s.length - 1];
+
+    // Mestre do Blefe / Judas: maior número de vitórias como impostor
+    const maxImp = Math.max(0, ...s.map(p => p.stats?.imp || 0));
+    const judas = maxImp > 0 ? s.find(p => (p.stats?.imp || 0) === maxImp) : null;
+    const judasTarget = judas || (s[0] !== sacoTarget ? s[0] : (s[1] || s[0]));
+
+    // 3. Preenchimento de Dados do DOM
+    // Slide 0: Abertura
+    const playerPill = document.getElementById('retro-player-pill');
+    if (playerPill) playerPill.innerText = `${s.length} Guerreiros na Mesa`;
+
+    // Slide 1: O Caos em Números
+    const elP = document.getElementById('retro-stat-points');
+    const elR = document.getElementById('retro-stat-rounds');
+    const elS = document.getElementById('retro-stat-streak');
+    const elB = document.getElementById('retro-stat-bombs');
+    if (elP) elP.innerText = '0';
+    if (elR) elR.innerText = '0';
+    if (elS) elS.innerText = '0';
+    if (elB) elB.innerText = '0';
+    window._retroTargetStats = {
+        points: totalPoints,
+        rounds: roundsPlayed,
+        streak: maxStreak,
+        bombs: totalBombs
+    };
+    const punchlineEl = document.getElementById('retro-stat-punchline');
+    if (punchlineEl) {
+        if (totalPoints === 0) {
+            punchlineEl.innerText = '"Uma noite zen: zero pontos, mas muitas risadas!"';
+        } else if (totalBombs >= 4) {
+            punchlineEl.innerText = '"O caos reinou supremo: bombas explodindo, prendas e vingança!"';
+        } else {
+            punchlineEl.innerText = '"Nenhum participante saiu dessa mesa com a reputação 100% intacta."';
+        }
+    }
+
+    // Slide 2: Saco de Pancadas
+    const sacoAvatarEl = document.getElementById('retro-saco-avatar');
+    const sacoNameEl = document.getElementById('retro-saco-name');
+    const sacoMetaEl = document.getElementById('retro-saco-meta');
+    const sacoDescEl = document.getElementById('retro-saco-desc');
+    if (sacoAvatarEl) sacoAvatarEl.innerHTML = window.generateCardHTML(sacoTarget).replace('width: 104px; height: 148px;', 'width: 84px; height: 120px; font-size:0.75em;');
+    if (sacoNameEl) sacoNameEl.innerText = sacoTarget.name;
+    if (sacoMetaEl) sacoMetaEl.innerText = `${maxPrendas > 0 ? maxPrendas : 0} penalidades sofridas`;
+    if (sacoDescEl) sacoDescEl.innerText = maxPrendas > 0 ? "Sofreu na pele a fúria e o azar da mesa, mas continuou de pé!" : "Inacreditável: mesa zen! Ninguém virou saco de pancadas hoje.";
+
+    // Slide 3: Mestre do Blefe
+    const judasAvatarEl = document.getElementById('retro-judas-avatar');
+    const judasNameEl = document.getElementById('retro-judas-name');
+    const judasMetaEl = document.getElementById('retro-judas-meta');
+    const judasDescEl = document.getElementById('retro-judas-desc');
+    if (judasAvatarEl) judasAvatarEl.innerHTML = window.generateCardHTML(judasTarget).replace('width: 104px; height: 148px;', 'width: 84px; height: 120px; font-size:0.75em;');
+    if (judasNameEl) judasNameEl.innerText = judasTarget.name;
+    if (judasMetaEl) judasMetaEl.innerText = `${maxImp > 0 ? maxImp : 1} vitórias em disfarces`;
+    if (judasDescEl) judasDescEl.innerText = maxImp > 0 ? "Mentiu, olhou no olho de todo mundo e saiu sorrindo com os pontos!" : "O verdadeiro enxadrista: venceu nas sombras sem levantar suspeitas.";
+
+    // Slide 4: Prata e Bronze
+    const bronzeCard = document.getElementById('retro-card-bronze');
+    const silverCard = document.getElementById('retro-card-silver');
+    const bronzeAvatarEl = document.getElementById('retro-bronze-avatar');
+    const bronzeNameEl = document.getElementById('retro-bronze-name');
+    const bronzePtsEl = document.getElementById('retro-bronze-pts');
+    const silverAvatarEl = document.getElementById('retro-silver-avatar');
+    const silverNameEl = document.getElementById('retro-silver-name');
+    const silverPtsEl = document.getElementById('retro-silver-pts');
+
+    if (runner3) {
+        if (bronzeCard) bronzeCard.style.display = 'flex';
+        if (bronzeAvatarEl) bronzeAvatarEl.innerHTML = window.generateCardHTML(runner3).replace('width: 104px; height: 148px;', 'width: 64px; height: 92px; font-size:0.65em;');
+        if (bronzeNameEl) bronzeNameEl.innerText = runner3.name;
+        if (bronzePtsEl) bronzePtsEl.innerText = `${runner3.score || 0} Pts`;
+    } else if (bronzeCard) {
+        bronzeCard.style.display = 'none';
+    }
+
+    if (runner2) {
+        if (silverCard) silverCard.style.display = 'flex';
+        if (silverAvatarEl) silverAvatarEl.innerHTML = window.generateCardHTML(runner2).replace('width: 104px; height: 148px;', 'width: 72px; height: 104px; font-size:0.68em;');
+        if (silverNameEl) silverNameEl.innerText = runner2.name;
+        if (silverPtsEl) silverPtsEl.innerText = `${runner2.score || 0} Pts`;
+    } else if (silverCard) {
+        silverCard.style.display = 'none';
+    }
+
+    // Slide 5: Campeão Supremo
+    const champAvatarEl = document.getElementById('retro-champ-avatar');
+    const champNameEl = document.getElementById('retro-champ-name');
+    const champPtsEl = document.getElementById('retro-champ-pts');
+    if (champAvatarEl) champAvatarEl.innerHTML = window.generateCardHTML(champ).replace('width: 104px; height: 148px;', 'width: 96px; height: 136px; font-size:0.8em;');
+    if (champNameEl) champNameEl.innerText = champ.name;
+    if (champPtsEl) champPtsEl.innerText = `${champ.score || 0} PONTOS`;
+
+    // Slide 6: Resumo Executivo
+    const sumChampName = document.getElementById('retro-sum-champ-name');
+    const sumChampPts = document.getElementById('retro-sum-champ-pts');
+    if (sumChampName) sumChampName.innerText = champ.name;
+    if (sumChampPts) sumChampPts.innerText = `${champ.score || 0} Pts`;
+
+    const sumRunnersRow = document.getElementById('retro-summary-runners-row');
+    if (sumRunnersRow) {
+        let itemsHTML = '';
+        if (runner2) {
+            itemsHTML += `
+                <div class="retro-summary-item">
+                    <div class="retro-summary-item-left">
+                        <span style="font-size:1.1em;">🥈</span>
+                        <div>
+                            <div class="retro-summary-item-title">2º LUGAR</div>
+                            <div class="retro-summary-item-name">${runner2.name}</div>
+                        </div>
+                    </div>
+                    <div class="retro-summary-item-pts">${runner2.score || 0} Pts</div>
+                </div>`;
+        }
+        if (runner3) {
+            itemsHTML += `
+                <div class="retro-summary-item">
+                    <div class="retro-summary-item-left">
+                        <span style="font-size:1.1em;">🥉</span>
+                        <div>
+                            <div class="retro-summary-item-title">3º LUGAR</div>
+                            <div class="retro-summary-item-name">${runner3.name}</div>
+                        </div>
+                    </div>
+                    <div class="retro-summary-item-pts">${runner3.score || 0} Pts</div>
+                </div>`;
+        }
+        if (sacoTarget && sacoTarget.name) {
+            itemsHTML += `
+                <div class="retro-summary-item">
+                    <div class="retro-summary-item-left">
+                        <span style="font-size:1.1em;">💥</span>
+                        <div>
+                            <div class="retro-summary-item-title">SACO DE PANCADAS</div>
+                            <div class="retro-summary-item-name">${sacoTarget.name}</div>
+                        </div>
+                    </div>
+                    <div class="retro-summary-item-pts" style="color:var(--pop-magenta);">${maxPrendas} penalidades</div>
+                </div>`;
+        }
+        if (judasTarget && judasTarget.name) {
+            itemsHTML += `
+                <div class="retro-summary-item">
+                    <div class="retro-summary-item-left">
+                        <span style="font-size:1.1em;">🎭</span>
+                        <div>
+                            <div class="retro-summary-item-title">MESTRE DO BLEFE</div>
+                            <div class="retro-summary-item-name">${judasTarget.name}</div>
+                        </div>
+                    </div>
+                    <div class="retro-summary-item-pts" style="color:var(--pop-cyan);">${maxImp > 0 ? maxImp : 1} blefes</div>
+                </div>`;
+        }
+        sumRunnersRow.innerHTML = itemsHTML;
+    }
+
+    // 4. Inicializa HUD, Canvas e Teclado
+    appCore.retroBuildProgressTrack();
+    appCore.retroInitAmbientCanvas();
+    appCore.retroBindKeys();
+
+    // 5. Inicia no Slide 0
+    retroIsPaused = false;
+    appCore.retroUpdatePauseButton();
+    appCore.retroIrParaSlide(0);
+};
+
+appCore.retroBuildProgressTrack = function() {
+    const track = document.getElementById('retro-progress-track');
+    if (!track) return;
+    track.innerHTML = '';
+    for (let i = 0; i < RETRO_TOTAL_SLIDES; i++) {
+        const seg = document.createElement('div');
+        seg.className = 'retro-seg';
+        seg.id = `retro-seg-${i}`;
+        seg.innerHTML = `<div class="retro-seg-fill" id="retro-seg-fill-${i}"></div>`;
+        track.appendChild(seg);
+    }
+};
+
+appCore.retroUpdateProgressBars = function(activeIndex) {
+    for (let i = 0; i < RETRO_TOTAL_SLIDES; i++) {
+        const seg = document.getElementById(`retro-seg-${i}`);
+        const fill = document.getElementById(`retro-seg-fill-${i}`);
+        if (!seg || !fill) continue;
+
+        if (i < activeIndex) {
+            seg.classList.add('completed');
+            fill.style.width = '100%';
+        } else if (i === activeIndex) {
+            seg.classList.remove('completed');
+            fill.style.width = '0%';
+        } else {
+            seg.classList.remove('completed');
+            fill.style.width = '0%';
+        }
+    }
+};
+
+appCore.retroInitAmbientCanvas = function() {
+    const canvas = document.getElementById('retro-ambient-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const resize = () => {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    };
+    resize();
+    window.addEventListener('resize', resize, { passive: true });
+
+    retroAmbientParticles = [];
+    const colors = ['#f59e0b', '#06b6d4', '#ec4899', '#8b5cf6', '#ffffff'];
+    for (let i = 0; i < 35; i++) {
+        retroAmbientParticles.push({
+            x: Math.random() * canvas.width,
+            y: Math.random() * canvas.height,
+            radius: 0.8 + Math.random() * 2.2,
+            color: colors[Math.floor(Math.random() * colors.length)],
+            vx: (Math.random() - 0.5) * 0.4,
+            vy: -0.2 - Math.random() * 0.5,
+            alpha: 0.15 + Math.random() * 0.45,
+            phase: Math.random() * Math.PI * 2
+        });
+    }
+
+    if (retroAmbientAnimId) cancelAnimationFrame(retroAmbientAnimId);
+
+    const loop = () => {
+        const retroScreen = document.getElementById('screen-retrospectiva');
+        if (!retroScreen || retroScreen.style.display === 'none') {
+            return;
+        }
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        for (let p of retroAmbientParticles) {
+            p.x += p.vx;
+            p.y += p.vy;
+            p.phase += 0.02;
+
+            if (p.y < -10) p.y = canvas.height + 10;
+            if (p.x < -10) p.x = canvas.width + 10;
+            if (p.x > canvas.width + 10) p.x = -10;
+
+            const curAlpha = Math.max(0.05, p.alpha + Math.sin(p.phase) * 0.2);
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+            ctx.fillStyle = p.color;
+            ctx.globalAlpha = curAlpha;
+            ctx.shadowBlur = 8;
+            ctx.shadowColor = p.color;
+            ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+        ctx.shadowBlur = 0;
+
+        retroAmbientAnimId = requestAnimationFrame(loop);
+    };
+
+    retroAmbientAnimId = requestAnimationFrame(loop);
+};
+
+appCore.retroBindKeys = function() {
+    if (retroKeyboardBound) return;
+    retroKeyboardBound = true;
+    window.addEventListener('keydown', (e) => {
+        const retroScreen = document.getElementById('screen-retrospectiva');
+        if (!retroScreen || retroScreen.style.display === 'none') return;
+
+        if (e.key === 'ArrowRight' || e.key === ' ') {
+            e.preventDefault();
+            appCore.retroNextSlide();
+        } else if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            appCore.retroPrevSlide();
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            appCore.retroClose();
+        }
+    });
+};
+
+appCore.retroIrParaSlide = function(index) {
+    if (index < 0) index = 0;
+    if (index >= RETRO_TOTAL_SLIDES) index = RETRO_TOTAL_SLIDES - 1;
+    retroCurrentSlide = index;
+
+    // Atualiza tag de capítulo
+    const tagEl = document.getElementById('retro-hud-tag');
+    if (tagEl) tagEl.innerText = `CAPÍTULO ${index + 1} DE ${RETRO_TOTAL_SLIDES}`;
+
+    // Alterna slides visíveis
+    for (let i = 0; i < RETRO_TOTAL_SLIDES; i++) {
+        const slide = document.getElementById(`retro-slide-${i}`);
+        if (slide) {
+            slide.classList.toggle('active', i === index);
+        }
+    }
+
+    // Atualiza barras de progresso
+    appCore.retroUpdateProgressBars(index);
+
+    // No último slide (resumo executivo), desativa as áreas de tap overlay para não bloquear os botões
+    const tapLeft = document.querySelector('.retro-tap-left');
+    const tapRight = document.querySelector('.retro-tap-right');
+    const footerCue = document.querySelector('.retro-footer-cue');
+    const isLastSlide = (index === RETRO_TOTAL_SLIDES - 1);
+    if (tapLeft) tapLeft.style.display = isLastSlide ? 'none' : 'block';
+    if (tapRight) tapRight.style.display = isLastSlide ? 'none' : 'block';
+    if (footerCue) footerCue.style.display = isLastSlide ? 'none' : 'block';
+
+    // Limpa timers anteriores
+    if (retroSlideTimer) clearTimeout(retroSlideTimer);
+    if (retroSlideProgressTween) {
+        retroSlideProgressTween.kill();
+        retroSlideProgressTween = null;
+    }
+
+    const activeSlideEl = document.getElementById(`retro-slide-${index}`);
+    if (!activeSlideEl) return;
+
+    const hasGsap = typeof window.gsap !== 'undefined';
+    if (hasGsap) {
+        window.gsap.killTweensOf(activeSlideEl.querySelectorAll('*'));
+    }
+
+    // Animação Orquestrada por Slide (Skill motion-design-gsap)
+    switch(index) {
+        case 0: // Abertura
+            window.playSound?.('pop');
+            if (hasGsap) {
+                window.gsap.fromTo(activeSlideEl.querySelector('.retro-intro-title'), 
+                    { scale: 0.88, opacity: 0, y: 20 },
+                    { scale: 1, opacity: 1, y: 0, duration: 0.5, ease: 'back.out(1.8)' }
+                );
+                window.gsap.fromTo(activeSlideEl.querySelector('.retro-intro-desc'),
+                    { opacity: 0, y: 15 },
+                    { opacity: 1, y: 0, duration: 0.4, delay: 0.2, ease: 'power2.out' }
+                );
+                window.gsap.fromTo(activeSlideEl.querySelector('.retro-start-btn'),
+                    { scale: 0.9, opacity: 0 },
+                    { scale: 1, opacity: 1, duration: 0.35, delay: 0.35, ease: 'back.out(2)' }
+                );
+            }
+            break;
+
+        case 1: // O Caos em Números (Odômetros com Ticker)
+            window.playSound?.('nav');
+            if (hasGsap && window._retroTargetStats) {
+                const statCards = activeSlideEl.querySelectorAll('.retro-stat-card');
+                window.gsap.fromTo(statCards,
+                    { opacity: 0, y: 24, scale: 0.92 },
+                    { opacity: 1, y: 0, scale: 1, duration: 0.45, stagger: 0.08, ease: 'power3.out' }
+                );
+                
+                const obj = { p: 0, r: 0, s: 0, b: 0 };
+                window.gsap.to(obj, {
+                    p: window._retroTargetStats.points,
+                    r: window._retroTargetStats.rounds,
+                    s: window._retroTargetStats.streak,
+                    b: window._retroTargetStats.bombs,
+                    duration: 1.6,
+                    ease: 'power2.out',
+                    onUpdate: () => {
+                        const elP = document.getElementById('retro-stat-points');
+                        const elR = document.getElementById('retro-stat-rounds');
+                        const elS = document.getElementById('retro-stat-streak');
+                        const elB = document.getElementById('retro-stat-bombs');
+                        if (elP) elP.innerText = Math.round(obj.p);
+                        if (elR) elR.innerText = Math.round(obj.r);
+                        if (elS) elS.innerText = Math.round(obj.s);
+                        if (elB) elB.innerText = Math.round(obj.b);
+                    },
+                    onComplete: () => {
+                        window.playPop?.();
+                    }
+                });
+            }
+            break;
+
+        case 2: // Saco de Pancadas
+            window.playSound?.('kaboom');
+            window.vibrar?.(250);
+            if (hasGsap) {
+                const card = document.getElementById('retro-card-saco');
+                const stamp = card?.querySelector('.retro-card-stamp');
+                window.gsap.fromTo(activeSlideEl,
+                    { x: -8 },
+                    { x: 0, duration: 0.35, ease: 'power2.out' }
+                );
+                if (card) {
+                    window.gsap.fromTo(card,
+                        { scale: 0.75, opacity: 0, rotateZ: -10, y: -35 },
+                        { scale: 1, opacity: 1, rotateZ: 0, y: 0, duration: 0.55, ease: 'bounce.out' }
+                    );
+                }
+                if (stamp) {
+                    window.gsap.fromTo(stamp,
+                        { scale: 2.8, opacity: 0 },
+                        { scale: 1, opacity: 1, duration: 0.3, delay: 0.35, ease: 'back.out(2.5)' }
+                    );
+                }
+            }
+            break;
+
+        case 3: // Mestre do Blefe
+            window.playSound?.('heartbeat');
+            window.hapticTap?.();
+            if (hasGsap) {
+                const card = document.getElementById('retro-card-judas');
+                const stamp = card?.querySelector('.retro-card-stamp');
+                if (card) {
+                    window.gsap.fromTo(card,
+                        { rotateY: 90, opacity: 0, scale: 0.8 },
+                        { rotateY: 0, opacity: 1, scale: 1, duration: 0.6, ease: 'power3.out' }
+                    );
+                }
+                if (stamp) {
+                    window.gsap.fromTo(stamp,
+                        { scale: 2.5, opacity: 0 },
+                        { scale: 1, opacity: 1, duration: 0.3, delay: 0.4, ease: 'back.out(2.2)' }
+                    );
+                }
+            }
+            break;
+
+        case 4: // Prata e Bronze
+            window.playSound?.('pop');
+            window.hapticTap?.();
+            if (hasGsap) {
+                const bronze = document.getElementById('retro-card-bronze');
+                const silver = document.getElementById('retro-card-silver');
+                if (bronze) {
+                    window.gsap.fromTo(bronze,
+                        { x: -50, opacity: 0, scale: 0.85 },
+                        { x: 0, opacity: 1, scale: 1, duration: 0.5, ease: 'back.out(1.6)' }
+                    );
+                }
+                if (silver) {
+                    window.gsap.fromTo(silver,
+                        { x: 50, opacity: 0, scale: 0.85 },
+                        { x: 0, opacity: 1, scale: 1, duration: 0.5, delay: 0.15, ease: 'back.out(1.6)' }
+                    );
+                }
+            }
+            break;
+
+        case 5: // Campeão Supremo (Clímax)
+            window.playSound?.('heartbeat');
+            if (hasGsap) {
+                const champCard = document.getElementById('retro-card-champ');
+                const crown = document.getElementById('retro-crown-icon');
+                const beam = activeSlideEl.querySelector('.retro-spotlight-beam');
+                
+                if (beam) {
+                    window.gsap.fromTo(beam, { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.8, ease: 'power2.out' });
+                }
+                if (champCard) {
+                    window.gsap.fromTo(champCard,
+                        { scale: 0.6, opacity: 0, y: 60 },
+                        { scale: 1, opacity: 1, y: 0, duration: 0.6, delay: 0.25, ease: 'back.out(1.8)' }
+                    );
+                }
+                if (crown) {
+                    window.gsap.fromTo(crown,
+                        { y: -80, opacity: 0, scale: 2 },
+                        { y: 0, opacity: 1, scale: 1, duration: 0.5, delay: 0.55, ease: 'bounce.out' }
+                    );
+                }
+            }
+            // Chuva maciça de confetes e fanfarra
+            setTimeout(() => {
+                window.playSound?.('victory');
+                window.vibrar?.(500);
+                if (typeof window.confetti === 'function') {
+                    window.confetti({
+                        particleCount: 175,
+                        spread: 100,
+                        origin: { y: 0.55 },
+                        colors: ['#f59e0b', '#ec4899', '#06b6d4', '#10b981', '#ffffff']
+                    });
+                }
+            }, 550);
+            break;
+
+        case 6: // Resumo Final
+            window.playSound?.('coin');
+            if (hasGsap) {
+                const sumCard = activeSlideEl.querySelector('.retro-summary-card');
+                const actions = activeSlideEl.querySelector('.retro-actions-stack');
+                if (sumCard) {
+                    window.gsap.fromTo(sumCard,
+                        { scale: 0.9, opacity: 0, y: 20 },
+                        { scale: 1, opacity: 1, y: 0, duration: 0.45, ease: 'power3.out' }
+                    );
+                }
+                if (actions) {
+                    window.gsap.fromTo(actions.querySelectorAll('.btn'),
+                        { opacity: 0, y: 15 },
+                        { opacity: 1, y: 0, duration: 0.35, stagger: 0.08, delay: 0.2, ease: 'power2.out' }
+                    );
+                }
+            }
+            break;
+    }
+
+    // Auto-advance de Stories (exceto último slide ou se pausado)
+    if (index < RETRO_TOTAL_SLIDES - 1 && !retroIsPaused) {
+        appCore.retroStartProgressAnimation(index);
+    }
+};
+
+appCore.retroStartProgressAnimation = function(index) {
+    const curFill = document.getElementById(`retro-seg-fill-${index}`);
+    if (!curFill) return;
+
+    curFill.style.width = '0%';
+    const durationMs = RETRO_SLIDE_DURATION_SEC * 1000;
+
+    if (typeof window.gsap !== 'undefined') {
+        retroSlideProgressTween = window.gsap.to(curFill, {
+            width: '100%',
+            duration: RETRO_SLIDE_DURATION_SEC,
+            ease: 'none',
+            onComplete: () => {
+                if (!retroIsPaused && retroCurrentSlide === index) {
+                    appCore.retroNextSlide();
+                }
+            }
+        });
+    } else {
+        curFill.style.transition = `width ${RETRO_SLIDE_DURATION_SEC}s linear`;
+        curFill.style.width = '100%';
+        retroSlideTimer = setTimeout(() => {
+            if (!retroIsPaused && retroCurrentSlide === index) appCore.retroNextSlide();
+        }, durationMs);
+    }
+};
+
+appCore.retroNextSlide = function() {
+    if (retroCurrentSlide < RETRO_TOTAL_SLIDES - 1) {
+        appCore.retroIrParaSlide(retroCurrentSlide + 1);
+    }
+};
+
+appCore.retroPrevSlide = function() {
+    if (retroCurrentSlide > 0) {
+        appCore.retroIrParaSlide(retroCurrentSlide - 1);
+    }
+};
+
+appCore.retroTogglePause = function() {
+    retroIsPaused = !retroIsPaused;
+    appCore.retroUpdatePauseButton();
+    if (retroIsPaused) {
+        if (retroSlideProgressTween) retroSlideProgressTween.pause();
+        if (retroSlideTimer) clearTimeout(retroSlideTimer);
+    } else {
+        if (retroSlideProgressTween) {
+            retroSlideProgressTween.resume();
+        } else {
+            appCore.retroStartProgressAnimation(retroCurrentSlide);
+        }
+    }
+};
+
+appCore.retroUpdatePauseButton = function() {
+    const btn = document.getElementById('retro-btn-pause');
+    if (btn) btn.innerText = retroIsPaused ? '▶️' : '⏸️';
+};
+
+appCore.retroToggleSound = function() {
+    store.isSoundOn = !store.isSoundOn;
+    store.save();
+    const btn = document.getElementById('retro-btn-sound');
+    if (btn) btn.innerText = store.isSoundOn ? '🔊' : '🔇';
+    window.hapticTap?.();
+};
+
+appCore.retroSkipToEnd = function() {
+    window.hapticTap?.();
+    appCore.retroIrParaSlide(RETRO_TOTAL_SLIDES - 1);
+};
+
+appCore.retroReplay = function() {
+    window.hapticTap?.();
+    appCore.retroIrParaSlide(0);
+};
+
+appCore.retroClose = function() {
+    if (retroSlideTimer) clearTimeout(retroSlideTimer);
+    if (retroSlideProgressTween) retroSlideProgressTween.kill();
+    if (retroAmbientAnimId) cancelAnimationFrame(retroAmbientAnimId);
+    appCore.nav('screen-home');
+};
+
+window.showRetrospectiva = appCore.iniciarRetrospectiva;
 
 appCore.verPosterInApp = function() {
     window.hapticTap();
@@ -2542,7 +3568,7 @@ appCore.desenharPosterNoCanvas = function(canvas, onReady) {
     // Rodapé
     ctx.fillStyle = '#090a0f';
     ctx.font = '900 26px system-ui, sans-serif';
-    ctx.fillText('GAME IS WAR 3.0 • PROVADO NO CAMPO DE BATALHA', 540, 1260);
+    ctx.fillText('GAME IS WAR 3.0 • CAMPEÃO DA NOITE', 540, 1260);
 
     if (champ.avatarUrl) {
         const img = new Image();
@@ -2575,19 +3601,23 @@ appCore.baixarPosterCanvas = function() {
 
 appCore.confirmarNovaNoite = function() {
     window.showCustomConfirm({
-        title: "Iniciar Nova Noite?",
-        text: "Os pontos e estatísticas de todos os guerreiros serão zerados para um novo placar!<br>Os avatares e nomes continuarão salvos na mesa.",
+        title: "Começar Nova Noite?",
+        text: "O placar e as penalidades de todos serão zerados para uma nova rodada de jogos!<br>Os avatares e nomes continuarão salvos na mesa.",
         icon: "🔄",
-        confirmLabel: "SIM, ZERAR PLACAR",
+        confirmLabel: "SIM, ZERAR PONTOS",
         confirmColor: "warning",
         onConfirm: () => {
             appCore.fecharPodio();
-            window.showCustomAlert("Placar Zerado!", "Os guerreiros estão prontos para uma nova batalha!", "⚔️");
+            window.showCustomAlert("Placar Zerado!", "Pontuação zerada com sucesso! Bora começar uma nova disputa!", "🔄");
         }
     });
 };
 
 appCore.fecharPodio = function() {
+    store.tournamentMode = false;
+    store.tourneyCurrentRound = 0;
+    store.sessionRounds = 0;
+    store.tourneyPool = [];
     store.players.forEach(p => { 
         p.score = 0; 
         p.falhas = 0; 
@@ -2611,6 +3641,8 @@ window.playError = () => bus.emit('audio:play', { sfx: 'error' });
 window.playNav = () => bus.emit('audio:play', { sfx: 'nav' });
 window.vibrar = (ms = 150) => bus.emit('haptics:trigger', { pattern: ms });
 window.hapticTap = () => bus.emit('haptics:trigger', { preset: 'tap' });
+window.playTension = (remainingSec) => bus.emit('audio:tension', { remainingSec });
+window.stopTension = () => bus.emit('audio:tension_stop');
 
 // Conexão Automática de Áudio Procedural na Interface
 document.addEventListener('click', (e) => {
@@ -2711,6 +3743,5 @@ window.addEventListener('DOMContentLoaded', () => {
     appCore.nav('screen-home');
     store.syncSettingsUI();
     window.renderPlayers();
-    appCore.renderShowcaseCard();
-    appCore.bindShowcaseGestures();
+    appCore.renderHomeGrid();
 });

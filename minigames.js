@@ -78,6 +78,10 @@ class MiniGameRunner {
     }
 
     startLoop() {
+        if (this.rafId) {
+            cancelAnimationFrame(this.rafId);
+            this.rafId = null;
+        }
         this.lastTime = performance.now();
         const loop = (now) => {
             if (!this.activeGame) return;
@@ -89,7 +93,20 @@ class MiniGameRunner {
             }
             const remaining = Math.max(0, this.stageDuration - this.stageElapsed);
 
-            if (this.activeGame.tick) {
+            // Adrenalina & Tensão Procedural: Batimentos cardíacos, vibração e brilho crítico nos últimos 10s
+            if (!this.isPaused && this.stageDuration > 0 && remaining <= 10 && remaining > 0) {
+                window.playTension?.(remaining);
+            }
+            const boardEl = document.getElementById('screen-game-board');
+            if (boardEl) {
+                if (!this.isPaused && this.stageDuration > 0 && remaining <= 8 && remaining > 0) {
+                    boardEl.classList.add('tension-critical-pulse');
+                } else {
+                    boardEl.classList.remove('tension-critical-pulse');
+                }
+            }
+
+            if (this.activeGame && this.activeGame.tick) {
                 this.activeGame.tick(delta, this.stageElapsed, remaining);
             }
 
@@ -175,17 +192,16 @@ class MiniGameRunner {
         // Suporte ao Botão de Continuação do Torneio
         const btnNextTourney = document.getElementById('btn-next-tourney');
         if (btnNextTourney) {
-            const allPlayers = window.GIW.store.players || [];
-            const tourneyOver = window.GIW.store.tournamentMode && allPlayers.some(p => (p.score || 0) >= window.GIW.store.tourneyTarget);
+            const tourneyOver = window.GIW.store.isTourneyOver();
             if (window.GIW.store.tournamentMode) {
                 btnNextTourney.style.display = 'block';
                 if (tourneyOver) {
                     btnNextTourney.className = 'btn btn-success';
-                    btnNextTourney.innerText = '🏆 VER O CAMPEÃO SUPREMO!';
+                    btnNextTourney.innerText = '👑 VER O CAMPEÃO SUPREMO! ➔';
                     btnNextTourney.onclick = () => appCore.encerrarNoite();
                 } else {
                     btnNextTourney.className = 'btn btn-warning';
-                    btnNextTourney.innerText = '🎰 PRÓXIMO JOGO DO TORNEIO ➔';
+                    btnNextTourney.innerText = `🎰 PRÓXIMO JOGO (${window.GIW.store.tourneyCurrentRound + 1}/${window.GIW.store.tourneyMaxRounds}) ➔`;
                     btnNextTourney.onclick = () => window.playTournamentNext();
                 }
             } else {
@@ -214,6 +230,13 @@ class MiniGameRunner {
                     { scale: 2.2, opacity: 0 }, 
                     { scale: 1, opacity: 1, duration: 0.45, delay: 0.35, ease: 'bounce.out' }
                 );
+                // Contagem animada dos pontos (0 -> topPts) com tick procedural
+                const counter = { v: 0 };
+                window.gsap.to(counter, {
+                    v: topPts, duration: 0.7, delay: 0.35, ease: 'power1.out',
+                    onUpdate: () => { badgeEl.innerText = `+${Math.round(counter.v)} PONTOS`; },
+                    onComplete: () => { badgeEl.innerText = `+${topPts} PONTOS`; window.playSound('coin'); }
+                });
             }
         }
     }
@@ -226,8 +249,16 @@ class MiniGameRunner {
     }
 
     teardown() {
+        if (this.rafId) {
+            cancelAnimationFrame(this.rafId);
+            this.rafId = null;
+        }
+        window.stopTension?.();
+        const boardEl = document.getElementById('screen-game-board');
+        if (boardEl) boardEl.classList.remove('tension-critical-pulse');
+
         if (this.activeGame && this.activeGame.destroy) {
-            this.activeGame.destroy();
+            try { this.activeGame.destroy(); } catch (_) {}
         }
         if (this.sandbox) {
             this.sandbox.dispose();
@@ -237,8 +268,6 @@ class MiniGameRunner {
         this.isPaused = true;
         const sb = document.getElementById('soundboard-ui');
         if (sb) sb.style.display = 'none';
-        const st = document.getElementById('btn-in-game-store');
-        if (st) st.style.display = 'none';
     }
 
     action(type, payload) {
@@ -259,7 +288,7 @@ function runCinematicVerdict({ votedPlayer, isGuilty, realCulprit, roleLabel = '
     appCore.nav('screen-verdict');
     const vSlot = document.getElementById('verdict-player-slot');
     const vStamp = document.getElementById('verdict-stamp');
-    const vLaser = document.getElementById('verdict-laser');
+    const vSpot = document.getElementById('verdict-spotlight');
     const vCardWrap = document.getElementById('verdict-card-container');
     const vBadge = document.getElementById('verdict-status-badge');
     const vIcon = document.getElementById('verdict-status-icon');
@@ -285,43 +314,45 @@ function runCinematicVerdict({ votedPlayer, isGuilty, realCulprit, roleLabel = '
         vExtra.style.transform = 'translateY(20px)';
         vExtra.innerHTML = '';
     }
-    if (vLaser) {
-        vLaser.style.opacity = '1';
+    if (vSpot) {
+        vSpot.className = 'verdict-spotlight';
+        vSpot.style.opacity = '0';
     }
     if (vBadge) {
         vBadge.style.color = 'var(--pop-cyan)';
         vBadge.style.borderColor = 'var(--ink-black)';
     }
-    if (vIcon) vIcon.innerText = '🔍';
-    if (vText) vText.innerText = 'ESCANEANDO BIOMETRIA...';
+    if (vIcon) vIcon.innerText = '⚖️';
+    if (vText) vText.innerText = 'A MESA ESTÁ EM SILÊNCIO...';
 
-    window.playSound('scan');
     window.playSound('heartbeat');
     window.hapticTap();
 
     if (typeof window.gsap !== 'undefined') {
-        window.gsap.fromTo(vLaser, 
-            { top: '-10%' }, 
-            { top: '110%', duration: 0.7, repeat: 2, yoyo: true, ease: 'sine.inOut' }
-        );
+        // Suspense: holofote acende devagar e a carta respira junto com o batimento
+        if (vSpot) window.gsap.to(vSpot, { opacity: 1, duration: 1.2, ease: 'power2.out' });
         window.gsap.fromTo(vCardWrap, 
-            { scale: 0.95 }, 
-            { scale: 1.05, duration: 1.0, repeat: 1, yoyo: true, ease: 'power1.inOut' }
+            { scale: 0.94, y: 12, opacity: 0.4 }, 
+            { scale: 1, y: 0, opacity: 1, duration: 0.5, ease: 'back.out(1.6)' }
         );
+        window.gsap.to(vCardWrap, { scale: 1.04, duration: 0.55, delay: 0.5, repeat: 3, yoyo: true, ease: 'sine.inOut' });
     }
 
-    // Fase 1: Álibi sob suspeita aos 1.1s
+    // Fase 1: tensão sobe aos 1.1s
     setTimeout(() => {
-        if (vIcon) vIcon.innerText = '⚡';
-        if (vText) vText.innerText = 'ANALISANDO ÁLIBI...';
+        if (vIcon) vIcon.innerText = '💓';
+        if (vText) vText.innerText = 'O VEREDITO VAI SAIR...';
         if (vBadge) vBadge.style.color = 'var(--pop-yellow)';
-        window.playSound('scan');
+        window.playSound('heartbeat');
         window.hapticTap();
     }, 1100);
 
-    // Fase 2: Carimbada brutal de impacto aos 2.2s
+    // Fase 2: carimbada de impacto aos 2.2s
     setTimeout(() => {
-        if (vLaser) vLaser.style.opacity = '0';
+        if (vSpot) {
+            const spotClass = isBobo ? null : (isGuilty ? 'is-safe' : 'is-hot');
+            if (spotClass) vSpot.classList.add(spotClass);
+        }
 
         if (isBobo) {
             // BOBO DA CORTE VENCEU - Expressão 19 (Deboche supremo)
@@ -438,7 +469,7 @@ function runCinematicVerdict({ votedPlayer, isGuilty, realCulprit, roleLabel = '
                 }
             }
             if (vIcon) vIcon.innerText = '❌';
-            if (vText) vText.innerText = 'ERRO FATAL! INOCENTE ELIMINADO';
+            if (vText) vText.innerText = 'ERROU! ERA INOCENTE';
             if (vBadge) {
                 vBadge.style.color = 'var(--pop-magenta)';
                 vBadge.style.borderColor = 'var(--pop-magenta)';
@@ -561,26 +592,67 @@ class GameImpostor {
             const p = this.players[this.turn];
             const isImp = this.turn === this.impostorIdx;
             const isBobo = this.turn === this.boboIdx;
-            document.getElementById('turn-player-name').innerText = p.name;
+
+            const palette = ['#ff7043', '#9c27b0', '#00b0ff', '#43a047', '#e91e63', '#ffb300', '#00e676', '#7c4dff'];
+            const cardBgColor = p.bg && p.bg !== '#ffffff' ? p.bg : palette[this.turn % palette.length];
+
+            const cardBg = document.getElementById('secret-card-bg');
+            if (cardBg) cardBg.style.backgroundColor = cardBgColor;
+
+            const pNameEl = document.getElementById('turn-player-name');
+            if (pNameEl) pNameEl.innerText = p.name;
+
+            const cardLbl = document.getElementById('reveal-card-player-label');
+            if (cardLbl) cardLbl.innerText = p.name;
+
+            const avatarSlot = document.getElementById('reveal-card-avatar-slot');
+            if (avatarSlot) {
+                const avatarImg = window.getDynamicDuoAvatarUrl ? window.getDynamicDuoAvatarUrl(p) : (p.avatarUrl || '');
+                avatarSlot.innerHTML = avatarImg ? `<img src="${avatarImg}" alt="${p.name}" style="width: 78px; height: 78px; object-fit: contain; filter: drop-shadow(0 6px 14px rgba(0,0,0,0.3));">` : `<span style="font-size:3.8rem;">👤</span>`;
+            }
+
+            const roleTag = document.getElementById('reveal-card-role-tag');
+            const roleTitle = document.getElementById('role-title');
             const sec = document.getElementById('secret-text');
 
             if (isImp) {
-                document.getElementById('role-title').innerText = 'VOCÊ É O INFILTRADO!';
-                sec.innerText = 'Descubra a palavra e blefe!';
-                sec.style.color = 'var(--pop-magenta)';
+                if (roleTag) roleTag.className = 'studio-card-role-tag is-impostor';
+                if (roleTitle) {
+                    roleTitle.innerText = 'IMPOSTOR';
+                    roleTitle.style.color = '#ff2a85';
+                }
+                if (sec) {
+                    sec.innerHTML = '<span style="font-size:0.85rem; color:#ffffff; font-weight:700;">Descubra a palavra e blefe!</span>';
+                }
             } else if (isBobo) {
-                document.getElementById('role-title').innerText = 'PALAVRA SECRETA (BOBO DA CORTE)';
-                sec.innerHTML = `
-                    <span style="color:var(--pop-cyan);">${this.secretWord}</span>
-                    <div style="font-size:0.62em; color:var(--pop-yellow); margin-top:10px; line-height:1.25; background:rgba(255,230,0,0.12); padding:8px 10px; border-radius:10px; border:1.5px solid var(--pop-yellow); text-align:center;">
-                        🤡 <b>MISSÃO DO BOBO DA CORTE:</b><br>Finja suspeita e faça a mesa votar em VOCÊ para roubar a vitória (+25 Pts)!
-                    </div>
-                `;
-                sec.style.color = 'var(--ink-white)';
+                if (roleTag) roleTag.className = 'studio-card-role-tag';
+                if (roleTitle) {
+                    roleTitle.innerText = 'PALAVRA SECRETA';
+                    roleTitle.style.color = '#00f0ff';
+                }
+                if (sec) {
+                    sec.innerHTML = `
+                        <div style="color:#ffffff; font-size:1.25rem; font-weight:900;">${this.secretWord}</div>
+                        <div style="margin-top: 6px;">
+                            <button type="button" class="bobo-pill-btn" onclick="minigames.toggleBoboHelp(event)" onpointerdown="event.stopPropagation()">
+                                <span>🤡 Bobo da Corte</span>
+                                <span id="bobo-help-icon" style="font-size:0.85em;">ℹ️</span>
+                            </button>
+                            <div id="bobo-help-desc" class="bobo-desc-box" style="display:none;" onpointerdown="event.stopPropagation()">
+                                🎯 <b>MISSÃO SECRETA:</b><br>Finja suspeita para a mesa votar em você no tribunal (+25 Pts)!
+                            </div>
+                        </div>
+                    `;
+                }
             } else {
-                document.getElementById('role-title').innerText = 'PALAVRA SECRETA';
-                sec.innerText = this.secretWord;
-                sec.style.color = 'var(--ink-white)';
+                if (roleTag) roleTag.className = 'studio-card-role-tag';
+                if (roleTitle) {
+                    roleTitle.innerText = 'PALAVRA SECRETA';
+                    roleTitle.style.color = '#00f0ff';
+                }
+                if (sec) {
+                    sec.innerHTML = `<span style="color:#ffffff; font-size:1.3rem; font-weight:900;">${this.secretWord}</span>`;
+                }
             }
         } else {
             this.startDiscussion();
@@ -596,15 +668,25 @@ class GameImpostor {
         const starter = this.players[Math.floor(Math.random() * this.players.length)];
         const gb = document.getElementById('gb-content');
         gb.innerHTML = `
-            <div class="game-box-display">
-                <div style="font-size:1.1em; color:var(--pop-cyan); font-weight:900;">TEMA DA SALA</div>
-                <div style="font-size:2.2em; font-weight:900; color:var(--pop-yellow);">${this.category}</div>
-                <p style="color:var(--ink-muted); margin-top:6px; font-weight:800;">Dica inicial por: <b>${starter.name}</b></p>
+            <div class="studio-card-setting" style="margin-bottom:14px; text-align:center; width:100%; max-width:340px;">
+                <div style="width:100%;">
+                    <div class="studio-card-title" style="color:var(--pop-cyan); letter-spacing:1px;">TEMA DA SALA</div>
+                    <div style="font-size:2.2rem; font-weight:900; color:var(--pop-yellow); margin:4px 0;">${this.category}</div>
+                    <div class="studio-card-desc">Dica inicial por: <b style="color:#fff;">${starter.name}</b></div>
+                </div>
             </div>
-            <div class="big-timer-circle">
-                <div id="imp-timer" class="timer-number">--</div>
+            
+            <div class="studio-timer-hero">
+                <div class="studio-timer-label">TEMPO DE DISCUSSÃO</div>
+                <div id="imp-timer" class="studio-timer-digits">--:--</div>
             </div>
-            <button class="btn btn-danger" style="max-width:320px;" onclick="minigames.startVoting()">🔥 ABRIR VOTAÇÃO</button>
+
+            <div style="width:100%; max-width:320px; margin-top:20px;">
+                <button class="studio-btn-cta" style="background:var(--pop-magenta); color:#fff; box-shadow: 0 8px 30px rgba(255, 42, 133, 0.4);" onclick="minigames.startVoting()">
+                    <span>ABRIR VOTAÇÃO</span>
+                    <span style="font-size:1.15em;">🔥</span>
+                </button>
+            </div>
         `;
         this.ctx.timer.start(this.config.time || 240);
     }
@@ -614,7 +696,16 @@ class GameImpostor {
             const el = document.getElementById('imp-timer');
             if (el) {
                 const s = Math.ceil(remaining);
-                el.innerText = `${Math.floor(s/60)}:${s%60 < 10 ? '0' : ''}${s%60}`;
+                const m = Math.floor(s / 60);
+                const sec = s % 60;
+                el.innerText = `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+                if (remaining <= 10) {
+                    el.style.color = 'var(--pop-magenta)';
+                } else if (remaining <= 30) {
+                    el.style.color = 'var(--pop-yellow)';
+                } else {
+                    el.style.color = '#ffffff';
+                }
             }
             if (remaining <= 0) {
                 this.ctx.timer.stop();
@@ -628,16 +719,25 @@ class GameImpostor {
         this.ctx.timer.stop();
         document.getElementById('soundboard-ui').style.display = 'none';
         appCore.nav('screen-vote');
+        minigames.selectedVotePlayerId = null;
+
+        const btnConfirm = document.getElementById('btn-confirm-vote');
+        if (btnConfirm) {
+            btnConfirm.style.opacity = '0.4';
+            btnConfirm.style.pointerEvents = 'none';
+        }
 
         const c = document.getElementById('vote-list-container');
-        c.innerHTML = '';
-        this.players.forEach(p => {
-            c.innerHTML += `
-                <div class="vote-card-btn" style="display:inline-block; margin:6px; cursor:pointer;" onclick="minigames.castVote('${p.id}')">
-                    <div style="transform: scale(0.92); transform-origin: center; pointer-events: none;">${window.generateCardHTML(p, '', '', null, false)}</div>
+        c.className = 'studio-vote-grid';
+        let html = '';
+        this.players.forEach((p, idx) => {
+            html += `
+                <div class="studio-vote-item" onclick="minigames.selectVoteTarget(this, '${p.id}')">
+                    ${window.generateStudioPlayerCard(p, { index: idx })}
                 </div>
             `;
         });
+        c.innerHTML = html;
     }
 
     castVote(vId) {
@@ -653,13 +753,13 @@ class GameImpostor {
             isGuilty: isCaught,
             isBobo: isBoboCaught,
             realCulprit: this.impostor,
-            roleLabel: 'INFILTRADO',
+            roleLabel: 'IMPOSTOR',
             onComplete: () => {
                 if (isBoboCaught) {
                     this.ctx.complete({
                         title: 'O Bobo da Corte Venceu! 🤡',
                         titleColor: 'var(--pop-yellow)',
-                        detailHTML: `<p style="font-weight:900; font-size:1.15em;"><b style="color:var(--pop-yellow);">${this.bobo.name}</b> foi eliminado de propósito e roubou todos os pontos!<br><span style="font-size:0.9em; color:var(--ink-muted);">Palavra: <b>${this.secretWord}</b> • Infiltrado: <b style="color:var(--pop-magenta);">${this.impostor.name}</b></span></p>`,
+                        detailHTML: `<p style="font-weight:900; font-size:1.15em;"><b style="color:var(--pop-yellow);">${this.bobo.name}</b> foi eliminado de propósito e roubou todos os pontos!<br><span style="font-size:0.9em; color:var(--ink-muted);">Palavra Secreta: <b>${this.secretWord}</b> • Impostor: <b style="color:var(--pop-magenta);">${this.impostor.name}</b></span></p>`,
                         scoreMutations: [{ playerId: this.bobo.id, baseDelta: 25 }],
                         losers: this.players.filter(p => p.id !== this.bobo.id).map(p => p.id),
                         celebrateWithConfetti: true
@@ -680,9 +780,9 @@ class GameImpostor {
                 }
 
                 this.ctx.complete({
-                    title: isCaught ? 'Infiltrado Derrotado!' : 'O Infiltrado Venceu!',
+                    title: isCaught ? 'Impostor Desmascarado! 🕵️' : 'O Impostor Venceu! 🎭',
                     titleColor: isCaught ? 'var(--pop-green)' : 'var(--pop-magenta)',
-                    detailHTML: `<p style="font-weight:900; font-size:1.2em;">Palavra: <b style="color:var(--pop-cyan);">${this.secretWord}</b><br>Infiltrado: <b style="color:var(--pop-magenta);">${this.impostor.name}</b></p>`,
+                    detailHTML: `<p style="font-weight:900; font-size:1.2em;">Palavra Secreta: <b style="color:var(--pop-cyan);">${this.secretWord}</b><br>Impostor: <b style="color:var(--pop-magenta);">${this.impostor.name}</b></p>`,
                     scoreMutations: mutations,
                     losers,
                     celebrateWithConfetti: true
@@ -692,21 +792,19 @@ class GameImpostor {
     }
 
     showCover() {
-        const cov = document.getElementById('secret-cover');
-        if (cov) cov.style.transform = 'translateY(100%)';
-        const btn = document.getElementById('btn-next-player');
-        if (btn) btn.style.display = 'block';
-        window.hapticTap();
+        minigames.animateCardReveal(true);
     }
 
     hideCover() {
-        const cov = document.getElementById('secret-cover');
-        if (cov) cov.style.transform = 'translateY(0%)';
+        minigames.animateCardReveal(false);
     }
 
     nextTurn() {
-        this.turn++;
-        this.renderTurn();
+        window.GIW_boboHelpOpen = false;
+        minigames.animateCardPass(() => {
+            this.turn++;
+            this.renderTurn();
+        });
     }
 
     handleAction(type, payload) {
@@ -730,7 +828,14 @@ class GameDuplas {
         const pairsPool = [
             ['Fogo', 'Gelo'], ['Batman', 'Coringa'], ['Café', 'Biscoito'],
             ['Sol', 'Lua'], ['Praia', 'Piscina'], ['Hambúrguer', 'Batata Frita'],
-            ['Cinema', 'Pipoca'], ['Gato', 'Cachorro'], ['Cerveja', 'Churrasco']
+            ['Cinema', 'Pipoca'], ['Gato', 'Cachorro'], ['Cerveja', 'Churrasco'],
+            ['Arroz', 'Feijão'], ['Queijo', 'Goiabada'], ['Romeu', 'Julieta'],
+            ['Vinho', 'Taça'], ['Praia', 'Protetor Solar'], ['Chuva', 'Guarda-Chuva'],
+            ['Garfo', 'Faca'], ['Lápis', 'Borracha'], ['Médico', 'Estetoscópio'],
+            ['Vampiro', 'Alho'], ['Super-Homem', 'Kryptonita'], ['Mario', 'Luigi'],
+            ['Pão de Queijo', 'Café com Leite'], ['Relógio', 'Alarme'], ['Violão', 'Palheta'],
+            ['Tênis', 'Meia'], ['Bolo', 'Vela de Aniversário'], ['Avião', 'Pára-quedas'],
+            ['Navio', 'Âncora'], ['Policial', 'Ladrão'], ['Mágico', 'Cartola']
         ];
         const selectedPair = pairsPool[Math.floor(Math.random() * pairsPool.length)];
         const [w1, w2] = selectedPair;
@@ -744,16 +849,7 @@ class GameDuplas {
                 this.roles.push({ id: p.id, word: idx % 2 === 0 ? w1 : w2, isImp: false });
             }
         });
-
-        // Papel Secreto Extra: Bobo da Corte
-        this.isRoles = config?.isRoles ?? window.GIW.store?.isRoles ?? true;
-        this.boboIdx = -1;
-        this.bobo = null;
-        if (this.isRoles && this.players.length >= 4) {
-            const pool = this.players.map((_, i) => i).filter(i => i !== this.impostorIdx);
-            this.boboIdx = pool[Math.floor(Math.random() * pool.length)];
-            this.bobo = this.players[this.boboIdx];
-        }
+        this.turn = 0;
     }
 
     start() {
@@ -769,7 +865,6 @@ class GameDuplas {
         if (this.turn < this.players.length) {
             const p = this.players[this.turn];
             const r = this.roles[this.turn];
-            const isBobo = this.turn === this.boboIdx;
             document.getElementById('turn-player-name').innerText = p.name;
             const sec = document.getElementById('secret-text');
 
@@ -777,15 +872,6 @@ class GameDuplas {
                 document.getElementById('role-title').innerText = 'ALERTA!';
                 sec.innerText = r.word;
                 sec.style.color = 'var(--pop-magenta)';
-            } else if (isBobo) {
-                document.getElementById('role-title').innerText = 'SUA PALAVRA (BOBO DA CORTE)';
-                sec.innerHTML = `
-                    <span>${r.word}</span>
-                    <div style="font-size:0.62em; color:var(--pop-yellow); margin-top:10px; line-height:1.25; background:rgba(255,230,0,0.12); padding:8px 10px; border-radius:10px; border:1.5px solid var(--pop-yellow); text-align:center;">
-                        🤡 <b>MISSÃO DO BOBO DA CORTE:</b><br>Finja que não tem par ou dê pistas falsas para ser eliminado no tribunal (+25 Pts)!
-                    </div>
-                `;
-                sec.style.color = 'var(--ink-white)';
             } else {
                 document.getElementById('role-title').innerText = 'SUA PALAVRA';
                 sec.innerText = r.word;
@@ -798,66 +884,57 @@ class GameDuplas {
                 <div class="game-box-display">
                     <p style="font-weight:900; font-size:1.1em;">Descubra sua dupla sem entregar sua palavra ao Infiltrado Solitário!</p>
                 </div>
-                <button class="btn btn-danger" style="max-width:320px;" onclick="minigames.startVoting()">ELIMINAR INFILTRADO ➔</button>
+                <button class="btn btn-danger" style="max-width:320px;" onclick="minigames.startVoting()">ABRIR VOTAÇÃO DA MESA ➔</button>
             `;
         }
     }
 
     handleAction(type, payload) {
         if (type === 'SHOW_SECRET') {
-            document.getElementById('secret-cover').style.transform = 'translateY(100%)';
-            document.getElementById('btn-next-player').style.display = 'block';
-            window.hapticTap();
+            minigames.animateCardReveal(true);
         } else if (type === 'HIDE_SECRET') {
-            document.getElementById('secret-cover').style.transform = 'translateY(0%)';
+            minigames.animateCardReveal(false);
         } else if (type === 'NEXT_TURN') {
-            this.turn++;
-            this.renderTurn();
+            window.GIW_boboHelpOpen = false;
+            minigames.animateCardPass(() => {
+                this.turn++;
+                this.renderTurn();
+            });
         } else if (type === 'START_VOTING') {
             appCore.nav('screen-vote');
             const c = document.getElementById('vote-list-container');
-            c.innerHTML = '';
-            this.players.forEach(p => {
-                c.innerHTML += `
-                    <div class="vote-card-btn" style="display:inline-block; margin:6px; cursor:pointer;" onclick="minigames.castVote('${p.id}')">
-                        <div style="transform: scale(0.92); transform-origin: center; pointer-events: none;">${window.generateCardHTML(p, '', '', null, false)}</div>
+            c.className = 'studio-vote-grid';
+            let html = '';
+            this.players.forEach((p, idx) => {
+                html += `
+                    <div class="studio-vote-item" onclick="minigames.selectVoteTarget(this, '${p.id}')">
+                        ${window.generateStudioPlayerCard(p, { index: idx })}
                     </div>
                 `;
             });
+            c.innerHTML = html;
         } else if (type === 'CAST_VOTE') {
             const impostor = this.players[this.impostorIdx];
             const votedPlayer = this.players.find(p => String(p.id) === String(payload)) || window.GIW.store.players.find(p => String(p.id) === String(payload));
             const isCaught = String(payload) === String(impostor.id);
-            const isBoboCaught = this.bobo && String(payload) === String(this.bobo.id);
             runCinematicVerdict({
                 votedPlayer,
                 isGuilty: isCaught,
                 realCulprit: impostor,
                 roleLabel: 'INFILTRADO',
-                isBobo: isBoboCaught,
+                isBobo: false,
                 onComplete: () => {
                     const mutations = [];
                     const losers = [];
-                    if (isBoboCaught) {
-                        mutations.push({ playerId: this.bobo.id, baseDelta: 25 });
-                        this.players.forEach(p => { if (p.id !== this.bobo.id) losers.push(p.id); });
-                        this.ctx.complete({
-                            title: 'O Bobo Venceu Tudo! 🤡',
-                            titleColor: 'var(--pop-yellow)',
-                            detailHTML: `<p style="font-weight:900; font-size:1.15em;">O Bobo <b style="color:var(--pop-yellow);">${this.bobo.name}</b> foi acusado de ser o infiltrado e roubou o jogo!</p>`,
-                            scoreMutations: mutations,
-                            losers,
-                            celebrateWithConfetti: true
-                        });
-                    } else if (isCaught) {
+                    if (isCaught) {
                         this.players.forEach(p => {
                             if (p.id !== impostor.id) mutations.push({ playerId: p.id, baseDelta: 10 });
                         });
                         losers.push(impostor.id);
                         this.ctx.complete({
-                            title: 'Infiltrado Eliminado!',
+                            title: 'Infiltrado Desmascarado! 👯',
                             titleColor: 'var(--pop-green)',
-                            detailHTML: `<p style="font-weight:900; font-size:1.15em;">Infiltrado: <b style="color:var(--pop-magenta);">${impostor.name}</b></p>`,
+                            detailHTML: `<p style="font-weight:900; font-size:1.15em;">Infiltrado: <b style="color:var(--pop-magenta);">${impostor.name}</b><br><span style="font-size:0.9em; color:var(--ink-muted);">As duplas se uniram e eliminaram o infiltrado com sucesso!</span></p>`,
                             scoreMutations: mutations,
                             losers,
                             celebrateWithConfetti: true
@@ -866,9 +943,9 @@ class GameDuplas {
                         mutations.push({ playerId: impostor.id, baseDelta: 15, statImpDelta: 1 });
                         this.players.forEach(p => { if (p.id !== impostor.id) losers.push(p.id); });
                         this.ctx.complete({
-                            title: 'O Infiltrado Enganou a Todos!',
+                            title: 'O Infiltrado Venceu a Mesa! 🎭',
                             titleColor: 'var(--pop-magenta)',
-                            detailHTML: `<p style="font-weight:900; font-size:1.15em;">Infiltrado: <b style="color:var(--pop-magenta);">${impostor.name}</b></p>`,
+                            detailHTML: `<p style="font-weight:900; font-size:1.15em;">Infiltrado: <b style="color:var(--pop-magenta);">${impostor.name}</b><br><span style="font-size:0.9em; color:var(--ink-muted);">O infiltrado passou despercebido e faturou a rodada sozinho!</span></p>`,
                             scoreMutations: mutations,
                             losers,
                             celebrateWithConfetti: true
@@ -894,7 +971,14 @@ class GameMacabro {
             { q: "Um homem acorda de madrugada, acende um cigarro, apaga uma luz e vai dormir. No dia seguinte, ouve o rádio e se desespera.", a: "Ele era o operador de um farol náutico e acidentalmente desligou a luz. Um navio colidiu nos recifes por causa disso." },
             { q: "Cinco pedaços de carvão, uma cenoura e um cachecol estão jogados no gramado de um sítio.", a: "Um boneco de neve derreteu sob o sol do meio-dia." },
             { q: "Uma mulher dispara uma arma contra o marido, segura a cabeça dele embaixo d'água por 5 minutos, e em seguida vão jantar juntos felizes.", a: "Ela é fotógrafa! Tirou uma foto dele, revelou o papel fotográfico no líquido escuro e pendurou para secar." },
-            { q: "Dois homens entram num bar e pedem a mesma bebida com muito gelo. Um bebe tudo de um gole só e sobrevive; o outro bebe devagar e morre.", a: "O veneno estava congelado nos cubos de gelo. Quem bebeu rápido não deu tempo do veneno derreter." }
+            { q: "Dois homens entram num bar e pedem a mesma bebida com muito gelo. Um bebe tudo de um gole só e sobrevive; o outro bebe devagar e morre.", a: "O veneno estava congelado nos cubos de gelo. Quem bebeu rápido não deu tempo do veneno derreter." },
+            { q: "Um homem morre em uma cabine telefônica com os braços abertos e as janelas quebradas.", a: "Ele era pescador e estava gesticulando no telefone sobre o tamanho gigante do peixe que pescou, quebrando os vidros e cortando os pulsos." },
+            { q: "Um homem é encontrado morto em um campo vazio com um pacote fechado nas costas.", a: "Seu paraquedas não abriu durante o salto." },
+            { q: "Música para, mulher morre. O que aconteceu?", a: "Ela era equilibrista cega de circo. A música indicava o momento exato de dar o salto mortal; a música parou antes da hora e ela caiu no vazio." },
+            { q: "Um homem morre afogado no meio de um incêndio florestal no topo de uma colina.", a: "Ele estava mergulhando em um lago quando um avião-tanque dos bombeiros coletou a água do lago e o despejou com a água sobre as chamas." },
+            { q: "Um homem entra em um bar e pede um copo d'água. O barman saca uma arma e aponta pra ele. O homem diz 'Obrigado!' e vai embora.", a: "O homem estava com um soluço incontrolável. O susto curou o soluço!" },
+            { q: "Um homem mora no 20º andar. Em dias de chuva ele pega o elevador até o 20º. Em dias de sol, vai até o 10º e sobe o resto pelas escadas. Por quê?", a: "Ele é uma pessoa com nanismo e só alcança o botão do 20º andar quando está carregando seu guarda-chuva!" },
+            { q: "Um corpo sem vida está no chão rodeado por 53 bicicletas.", a: "Ele foi pego trapaceando no carteado (Bicycle é a marca de baralhos mais famosa, e um baralho tem 52 cartas + 1 extra)." }
         ];
         this.chosen = stories[Math.floor(Math.random() * stories.length)];
     }
@@ -927,9 +1011,9 @@ class GameMacabro {
             });
         } else if (type === 'SURRENDER_MACABRO') {
             this.ctx.complete({
-                title: 'Mistério Não Revelado!',
+                title: 'Mistério Não Desvendado! 🕵️',
                 titleColor: 'var(--pop-magenta)',
-                detailHTML: `<p style="font-weight:900; font-size:1.1em;">A mesa não conseguiu desvendar o enigma. Nenhum ponto ganho.</p>`,
+                detailHTML: `<p style="font-weight:900; font-size:1.1em;">A mesa não conseguiu desvendar o enigma a tempo. Nenhum ponto ganho.</p>`,
                 scoreMutations: [],
                 celebrateWithConfetti: false
             });
@@ -952,8 +1036,8 @@ class GamePosicoes {
         });
         this.tableOrder = [...this.assigned];
 
-        // Papel Secreto Extra: O Sabotador
-        this.isRoles = config?.isRoles ?? window.GIW.store?.isRoles ?? true;
+        // Papel Secreto Extra: O Sabotador (desligado por padrão, ativável no Lobby)
+        this.isRoles = config?.isRoles ?? window.GIW.store?.isRoles ?? false;
         this.sabotadorIdx = -1;
         this.sabotador = null;
         if (this.isRoles && this.players.length >= 4) {
@@ -976,18 +1060,23 @@ class GamePosicoes {
             const a = this.assigned[this.turn];
             const isSabotador = this.turn === this.sabotadorIdx;
             document.getElementById('turn-player-name').innerText = a.name;
+            document.getElementById('role-title').innerText = 'SUA NOTA (1 A 10)';
             const sec = document.getElementById('secret-text');
 
             if (isSabotador) {
-                document.getElementById('role-title').innerText = 'SUA NOTA (SABOTADOR! 🧨)';
                 sec.innerHTML = `
                     <span style="color:var(--pop-yellow);">${a.num} / 10</span>
-                    <div style="font-size:0.62em; color:var(--pop-magenta); margin-top:10px; line-height:1.25; background:rgba(255,0,85,0.12); padding:8px 10px; border-radius:10px; border:1.5px solid var(--pop-magenta); text-align:center;">
-                        🧨 <b>VOCÊ É O SABOTADOR:</b><br>Dê dicas sutis e confusas! Se a mesa errar a ordenação, você fatura +20 Pts sozinho!
+                    <div style="margin-top: 14px; display:flex; flex-direction:column; align-items:center;">
+                        <button type="button" class="bobo-pill-btn" onclick="minigames.toggleBoboHelp(event)" onpointerdown="event.stopPropagation()">
+                            <span>🧨 Sabotador</span>
+                            <span id="bobo-help-icon" style="font-size:0.85em; opacity:0.85;">ℹ️</span>
+                        </button>
+                        <div id="bobo-help-desc" class="bobo-desc-box" style="display:none;" onpointerdown="event.stopPropagation()">
+                            🧨 <b>MISSÃO SECRETA:</b><br>Dê dicas sutis e confusas! Se a mesa errar a ordenação, você fatura +20 Pts sozinho!
+                        </div>
                     </div>
                 `;
             } else {
-                document.getElementById('role-title').innerText = 'SUA NOTA (1 A 10)';
                 sec.innerText = `${a.num} / 10`;
                 sec.style.color = 'var(--pop-yellow)';
             }
@@ -1107,14 +1196,15 @@ class GamePosicoes {
 
     handleAction(type, payload) {
         if (type === 'SHOW_SECRET') {
-            document.getElementById('secret-cover').style.transform = 'translateY(100%)';
-            document.getElementById('btn-next-player').style.display = 'block';
-            window.hapticTap();
+            minigames.animateCardReveal(true);
         } else if (type === 'HIDE_SECRET') {
-            document.getElementById('secret-cover').style.transform = 'translateY(0%)';
+            minigames.animateCardReveal(false);
         } else if (type === 'NEXT_TURN') {
-            this.turn++;
-            this.renderTurn();
+            window.GIW_boboHelpOpen = false;
+            minigames.animateCardPass(() => {
+                this.turn++;
+                this.renderTurn();
+            });
         } else if (type === 'MOVE_POS') {
             this.movePos(payload.idx, payload.dir);
         } else if (type === 'VERIFY_POS') {
@@ -1129,42 +1219,94 @@ class GamePosicoes {
 class GameNota {
     constructor(config, teams, ctx) {
         this.ctx = ctx;
-        const allPlayers = teams[0]?.players?.length ? teams[0].players : (window.GIW.store.players || []);
-        const shuf = shuffle([...allPlayers]);
-        this.evaluator = shuf[0] || { id: 'p_eval', name: 'Avaliador' };
-        this.guesser = shuf[1] || (shuf[0] ? { id: shuf[0].id + '_2', name: 'Adivinhador' } : { id: 'p_guess', name: 'Adivinhador' });
-        this.secretNum = Math.floor(Math.random() * 10) + 1;
+        const allPlayers = window.GIW.store.players || [];
+        
+        // Garante 2 duplas: Dupla 1 (Avaliador 1 + Adivinhador 1) vs Dupla 2 (Avaliador 2 + Adivinhador 2)
+        if (teams.length >= 2 && teams[0]?.players?.length >= 2 && teams[1]?.players?.length >= 2) {
+            this.t1 = teams[0].players;
+            this.t2 = teams[1].players;
+        } else {
+            const shuf = shuffle([...allPlayers]);
+            this.t1 = [shuf[0] || { id: 'p1', name: 'Jogador 1' }, shuf[1] || { id: 'p2', name: 'Jogador 2' }];
+            this.t2 = [shuf[2] || { id: 'p3', name: 'Jogador 3' }, shuf[3] || { id: 'p4', name: 'Jogador 4' }];
+        }
+
+        this.t1Eval = this.t1[0];
+        this.t1Guess = this.t1[1];
+        this.t2Eval = this.t2[0];
+        this.t2Guess = this.t2[1];
+
+        this.note1 = Math.floor(Math.random() * 10) + 1;
+        this.note2 = Math.floor(Math.random() * 10) + 1;
+
+        this.memoStep = 1; // 1: Avaliador 1 memoriza, 2: Avaliador 2 memoriza, 3: Duelo
+        this.activeTeam = 0; // 0 = Dupla 1, 1 = Dupla 2
+        this.roundNum = 1;
+
         this.categories = [
             '🍕 Uma Comida com essa nota',
-            '🎬 Um Filme / Série com essa nota',
+            '🎬 Um Filme ou Série com essa nota',
             '🎵 Uma Música com essa nota',
             '🦸 Um Superpoder com essa nota',
             '🚗 Um Carro com essa nota',
             '✈️ Um Destino de Férias com essa nota',
-            '🎮 Um Jogo com essa nota',
-            '📱 Um Aplicativo com essa nota'
+            '🎮 Um Jogo de Videogame com essa nota',
+            '📱 Um Aplicativo de Celular com essa nota',
+            '💘 Uma Cantada no Primeiro Encontro com essa nota',
+            '👔 Um Look para ir a um Casamento com essa nota',
+            '💀 Uma Mentira Contada para o Chefe com essa nota',
+            '🏨 Um Hotel ou Pousada com essa nota',
+            '🎁 Um Presente de Aniversário com essa nota',
+            '🧟 Uma Estratégia num Apocalipse Zumbi com essa nota',
+            '🍔 Um Lanche Podrão de Rua com essa nota',
+            '🍻 Uma Marca de Cerveja ou Bebida com essa nota',
+            '💔 Um Motivo para Terminar um Namoro com essa nota',
+            '🎨 Uma Ideia de Tatuagem com essa nota',
+            '🧗 Um Esporte Radical com essa nota',
+            '📺 Um Desenho Animado da Infância com essa nota',
+            '🛋️ Um Sofá ou Móvel de Casa com essa nota',
+            '🐶 Uma Raça de Cachorro com essa nota',
+            '🏖️ Uma Praia Brasileira com essa nota',
+            '📻 Uma Música para Tocar no seu Velório com essa nota'
         ];
     }
 
     start() {
         appCore.nav('screen-game-board');
-        document.getElementById('gb-title').innerText = 'A Nota (Em Dupla)';
+        document.getElementById('gb-title').innerText = 'A Nota (Duelo de Duplas)';
+        this.renderMemorization();
+    }
+
+    renderMemorization() {
+        const isFirst = this.memoStep === 1;
+        const evalPlayer = isFirst ? this.t1Eval : this.t2Eval;
+        const guessPlayer = isFirst ? this.t1Guess : this.t2Guess;
+        const teamName = isFirst ? 'DUPLA 1' : 'DUPLA 2';
+        const teamColor = isFirst ? 'var(--pop-cyan)' : 'var(--pop-yellow)';
+        const note = isFirst ? this.note1 : this.note2;
+        const nextActionLabel = isFirst 
+            ? `JÁ MEMORIZEI ➔ VEZ DA DUPLA 2` 
+            : `JÁ MEMORIZEI ➔ INICIAR DUELO ⚔️`;
+
         const gb = document.getElementById('gb-content');
         gb.innerHTML = `
             <div class="game-box-display">
-                <p style="color:var(--pop-cyan); font-weight:900; font-size:1.05em; margin-bottom:4px;">DUPLA ATIVA:</p>
-                <div style="font-size:1.25em; font-weight:900; color:var(--pop-yellow); margin-bottom:12px;">${this.evaluator.name} & ${this.guesser.name}</div>
+                <span style="background:${teamColor}; color:#000; font-weight:900; font-size:0.82em; padding:3px 12px; border-radius:12px; display:inline-block; margin-bottom:8px;">
+                    MEMORIZAÇÃO: ${teamName} (${evalPlayer.name} & ${guessPlayer.name})
+                </span>
                 
                 <div style="background:rgba(255,230,0,0.06); border:2px dashed var(--pop-yellow); border-radius:14px; padding:16px 12px; margin:10px 0;">
-                    <p style="color:var(--pop-yellow); font-size:0.85em; font-weight:900; margin:0 0 8px 0;">APENAS ${this.evaluator.name.toUpperCase()} PODE VER:</p>
+                    <p style="color:var(--pop-yellow); font-size:0.85em; font-weight:900; margin:0 0 8px 0;">
+                        APENAS ${evalPlayer.name.toUpperCase()} PODE VER:
+                    </p>
                     
                     <div id="nota-secret-display" style="min-height:90px; display:flex; flex-direction:column; align-items:center; justify-content:center;">
                         <div id="nota-hidden-placeholder" style="display:flex; flex-direction:column; align-items:center; gap:6px;">
                             <span style="font-size:2.4em;">🔒</span>
-                            <span style="font-size:0.8em; font-weight:800; color:var(--ink-muted);">Segure o botão abaixo para revelar a nota</span>
+                            <span style="font-size:0.8em; font-weight:800; color:var(--ink-muted);">Segure o botão abaixo para revelar a nota secreta</span>
                         </div>
                         <div id="nota-revealed-val" style="display:none; font-size:4em; font-weight:900; color:var(--pop-yellow); line-height:1; text-shadow:0 0 16px rgba(255,230,0,0.6);">
-                            ${this.secretNum} <span style="font-size:0.4em; color:var(--ink-muted);">/ 10</span>
+                            ${note} <span style="font-size:0.4em; color:var(--ink-muted);">/ 10</span>
                         </div>
                     </div>
                 </div>
@@ -1180,7 +1322,7 @@ class GameNota {
                     👆 SEGURE PARA VER A NOTA
                 </button>
             </div>
-            <button class="btn btn-primary" style="max-width:320px; margin-top:8px;" onclick="minigames.startNotaGuess()">JÁ MEMORIZEI — INICIAR PERGUNTAS ➔</button>
+            <button class="btn btn-primary" style="max-width:320px; margin-top:8px;" onclick="minigames.startNotaGuess()">${nextActionLabel}</button>
         `;
     }
 
@@ -1202,7 +1344,26 @@ class GameNota {
         }
     }
 
-    startGuess() {
+    advanceMemo() {
+        if (this.memoStep === 1) {
+            this.memoStep = 2;
+            window.playSound('nav');
+            window.hapticTap();
+            this.renderMemorization();
+        } else {
+            this.memoStep = 3;
+            window.playSound('victory');
+            this.startDuelTurn();
+        }
+    }
+
+    startDuelTurn() {
+        const isTeam1 = this.activeTeam === 0;
+        const evalPlayer = isTeam1 ? this.t1Eval : this.t2Eval;
+        const guessPlayer = isTeam1 ? this.t1Guess : this.t2Guess;
+        const teamName = isTeam1 ? 'DUPLA 1' : 'DUPLA 2';
+        const teamColor = isTeam1 ? 'var(--pop-cyan)' : 'var(--pop-yellow)';
+
         const catButtons = this.categories.map(c => `
             <div class="chip" style="font-size:0.75em; cursor:pointer;" onclick="this.classList.toggle('on'); window.playSound('pop'); window.hapticTap();">
                 ${c}
@@ -1216,8 +1377,19 @@ class GameNota {
         const gb = document.getElementById('gb-content');
         gb.innerHTML = `
             <div class="game-box-display">
-                <p style="color:var(--pop-cyan); font-weight:900; font-size:0.95em; margin-bottom:4px;">VEZ DE ${this.guesser.name.toUpperCase()} FAZER PERGUNTAS:</p>
-                <p style="font-size:0.8em; color:var(--ink-muted); font-weight:800; margin-bottom:12px;">Faça perguntas para ${this.evaluator.name} ("Uma comida com essa nota?", etc.) para calibrar!</p>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <span style="background:${teamColor}; color:#000; font-weight:900; font-size:0.82em; padding:3px 10px; border-radius:12px;">
+                        ${teamName} (${evalPlayer.name} & ${guessPlayer.name})
+                    </span>
+                    <span style="font-size:0.82em; font-weight:900; color:var(--ink-muted);">Rodada ${this.roundNum}</span>
+                </div>
+
+                <p style="color:var(--pop-cyan); font-weight:900; font-size:0.95em; margin-bottom:4px;">
+                    VEZ DE ${guessPlayer.name.toUpperCase()} FAZER PERGUNTAS:
+                </p>
+                <p style="font-size:0.8em; color:var(--ink-muted); font-weight:800; margin-bottom:12px;">
+                    Faça 1 pergunta para ${evalPlayer.name} calibrar a nota e tente acertar!
+                </p>
                 
                 <div style="margin-bottom:14px;">
                     <button class="btn btn-dark btn-sm" style="font-size:0.78em; padding:6px 12px; border-radius:20px;" onclick="const el = document.getElementById('nota-suggestions-box'); el.style.display = el.style.display === 'none' ? 'flex' : 'none'; window.playSound('pop');">
@@ -1229,7 +1401,9 @@ class GameNota {
                 </div>
 
                 <div style="border-top:1.5px solid rgba(255,255,255,0.1); padding-top:12px;">
-                    <p style="font-size:0.9em; font-weight:900; color:var(--pop-yellow); margin-bottom:8px;">QUAL É A NOTA FINAL DE ${this.evaluator.name.toUpperCase()}?</p>
+                    <p style="font-size:0.9em; font-weight:900; color:var(--pop-yellow); margin-bottom:8px;">
+                        QUAL É O CHUTE DE ${guessPlayer.name.toUpperCase()}?
+                    </p>
                     <div style="display:flex; flex-wrap:wrap; gap:6px; justify-content:center;">${buttons}</div>
                 </div>
             </div>
@@ -1237,38 +1411,34 @@ class GameNota {
     }
 
     guess(n) {
-        const diff = Math.abs(n - this.secretNum);
-        const pts = diff === 0 ? 20 : diff === 1 ? 10 : 0;
+        const isTeam1 = this.activeTeam === 0;
+        const targetNote = isTeam1 ? this.note1 : this.note2;
+        const evalPlayer = isTeam1 ? this.t1Eval : this.t2Eval;
+        const guessPlayer = isTeam1 ? this.t1Guess : this.t2Guess;
+        const teamName = isTeam1 ? 'Dupla 1' : 'Dupla 2';
+        const otherTeamName = isTeam1 ? 'Dupla 2' : 'Dupla 1';
+        const isExact = n === targetNote;
 
         const gb = document.getElementById('gb-content');
         if (gb) {
             gb.innerHTML = `
                 <div class="game-box-display">
-                    <p style="color:var(--pop-cyan); font-weight:900;">VEREDITO DA DUPLA</p>
+                    <p style="color:var(--pop-cyan); font-weight:900;">TENTATIVA DA ${teamName.toUpperCase()}</p>
                     <div style="display:flex; justify-content:center; align-items:center; gap:20px; margin:16px 0;">
                         <div style="text-align:center;">
-                            <div style="font-size:0.82em; font-weight:900; color:var(--ink-muted);">CHUTE DE ${this.guesser.name.toUpperCase()}</div>
-                            <div style="font-size:3em; font-weight:900; color:var(--pop-yellow);">${n}</div>
-                        </div>
-                        <div style="font-size:2em; font-weight:900; color:var(--ink-muted);">VS</div>
-                        <div style="text-align:center;">
-                            <div style="font-size:0.82em; font-weight:900; color:var(--ink-muted);">NOTA DE ${this.evaluator.name.toUpperCase()}</div>
-                            <div id="nota-real-val" style="font-size:3em; font-weight:900; color:var(--pop-green);">${this.secretNum}</div>
+                            <div style="font-size:0.82em; font-weight:900; color:var(--ink-muted);">CHUTE DE ${guessPlayer.name.toUpperCase()}</div>
+                            <div style="font-size:3.5em; font-weight:900; color:var(--pop-yellow);">${n}</div>
                         </div>
                     </div>
-                    <div id="nota-verdict-tag" style="font-size:1.25em; font-weight:900; color:${diff === 0 ? 'var(--pop-green)' : diff === 1 ? 'var(--pop-yellow)' : 'var(--pop-magenta)'};">
-                        ${diff === 0 ? '🎯 NA MOSCA! SINTONIA TOTAL!' : diff === 1 ? '🔥 QUASE LÁ! DIFERENÇA DE 1!' : '❌ LONGE DEMAIS!'}
+                    <div id="nota-verdict-tag" style="font-size:1.25em; font-weight:900; color:${isExact ? 'var(--pop-green)' : 'var(--pop-magenta)'};">
+                        ${isExact ? '🎯 NA MOSCA! DUPLA ACERTOU EM CHEIO!' : `❌ ERROU! A nota de ${evalPlayer.name} NÃO É ${n}!`}
                     </div>
+                    ${!isExact ? `<p style="font-size:0.85em; color:var(--ink-muted); margin-top:8px;">Passando a vez para a <b>${otherTeamName}</b> tentar...</p>` : ''}
                 </div>
             `;
-            if (typeof window.gsap !== 'undefined') {
-                window.gsap.fromTo('#nota-real-val', { scale: 2.5, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.4, ease: 'back.out(2)' });
-            }
-            if (diff === 0) {
+            if (isExact) {
                 window.playSound('success');
-                window.GIW.bus.emit('fx:juice', { type: 'confetti', particleCount: 90 });
-            } else if (diff === 1) {
-                window.playSound('beep');
+                window.GIW.bus.emit('fx:juice', { type: 'confetti', particleCount: 100 });
             } else {
                 window.playSound('badum');
             }
@@ -1276,20 +1446,40 @@ class GameNota {
         }
 
         setTimeout(() => {
-            const duoIds = Array.from(new Set([this.evaluator.id, this.guesser.id]));
-            const mutations = pts > 0 ? duoIds.map(id => ({ playerId: id, baseDelta: pts })) : [];
-            this.ctx.complete({
-                title: diff === 0 ? 'Sintonia Perfeita! 🎯' : diff === 1 ? 'Passou Raspando! 🔥' : 'Falta de Sintonia! ❌',
-                titleColor: diff === 0 ? 'var(--pop-green)' : diff === 1 ? 'var(--pop-yellow)' : 'var(--pop-magenta)',
-                detailHTML: `<p style="font-weight:900; font-size:1.15em;">Nota Real: <b>${this.secretNum}</b> | Chute da Dupla: <b>${n}</b><br>${pts > 0 ? `<b style="color:var(--pop-green);">+${pts} Pts para ${this.evaluator.name} e ${this.guesser.name}!</b>` : 'Nenhum ponto marcado pela dupla.'}</p>`,
-                scoreMutations: mutations,
-                celebrateWithConfetti: pts > 0
-            });
+            if (isExact) {
+                const winningDuo = isTeam1 ? [this.t1Eval, this.t1Guess] : [this.t2Eval, this.t2Guess];
+                const losingDuo = isTeam1 ? [this.t2Eval, this.t2Guess] : [this.t1Eval, this.t1Guess];
+                const mutations = winningDuo.map(p => ({ playerId: p.id, baseDelta: 20 }));
+
+                this.ctx.complete({
+                    title: `${teamName.toUpperCase()} ACERTOU PRIMEIRO! 🏆`,
+                    titleColor: 'var(--pop-green)',
+                    detailHTML: `
+                        <p style="font-weight:900; font-size:1.15em;">
+                            Nota exata: <b>${targetNote}</b> acertada na Rodada ${this.roundNum}!<br>
+                            <b style="color:var(--pop-green);">+20 Pts para ${winningDuo.map(p => p.name).join(' e ')}!</b>
+                        </p>
+                        <p style="font-size:0.8em; color:var(--ink-muted); margin-top:6px;">
+                            A nota da ${otherTeamName} era ${isTeam1 ? this.note2 : this.note1}.
+                        </p>
+                    `,
+                    scoreMutations: mutations,
+                    losers: losingDuo.map(p => p.id),
+                    celebrateWithConfetti: true
+                });
+            } else {
+                // Alterna a dupla
+                if (this.activeTeam === 1) {
+                    this.roundNum++;
+                }
+                this.activeTeam = 1 - this.activeTeam;
+                this.startDuelTurn();
+            }
         }, 1800);
     }
 
     handleAction(type, payload) {
-        if (type === 'START_NOTA_GUESS') this.startGuess();
+        if (type === 'START_NOTA_GUESS') this.advanceMemo();
         else if (type === 'GUESS_NOTA') this.guess(payload);
         else if (type === 'REVEAL_NOTA') this.setRevealed(payload);
     }
@@ -1301,13 +1491,37 @@ class GameNota {
 class GameUnica {
     constructor(config, teams, ctx) {
         this.ctx = ctx;
-        this.players = shuffle(teams[0]?.players || []);
-        this.guesser = this.players[0];
-        this.clueGivers = this.players.slice(1);
+        
+        // Conecta ao Lobby: Time 0 é o Adivinhador selecionado, Time 1 são os que dão as dicas
+        if (teams.length >= 2 && teams[0]?.players?.length && teams[1]?.players?.length) {
+            this.guesser = teams[0].players[0];
+            this.clueGivers = teams[1].players;
+            this.players = [this.guesser, ...this.clueGivers];
+        } else {
+            this.players = shuffle(teams[0]?.players || window.GIW.store.players || []);
+            this.guesser = this.players[0] || { id: 'p_guess', name: 'Adivinhador' };
+            this.clueGivers = this.players.slice(1);
+        }
+
         this.clueIdx = 0;
         this.clues = [];
 
-        const words = ['Astronauta', 'Guitarra', 'Vampiro', 'Dinossauro', 'Cachoeira', 'Hambúrguer'];
+        let words = [];
+        if (config?.themes && config.themes.length > 0 && window.categoriasIniciais) {
+            config.themes.forEach(cat => {
+                if (window.categoriasIniciais[cat]) words.push(...window.categoriasIniciais[cat]);
+            });
+        }
+        if (words.length < 5) {
+            words = [
+                'Astronauta', 'Guitarra', 'Vampiro', 'Dinossauro', 'Cachoeira', 'Hambúrguer',
+                'Tubarão', 'Pirâmide', 'Helicóptero', 'Microscópio', 'Diamante', 'Vulcão',
+                'Submarino', 'Tornado', 'Canguru', 'Aranha', 'Espada', 'Castelo',
+                'Esqueleto', 'Paraquedas', 'Laboratório', 'Múmia', 'Estátua', 'Lanterna',
+                'Bumerangue', 'Carrossel', 'Foguete', 'Cofre', 'Navio', 'Camaleão',
+                'Bússola', 'Sereia', 'Telescópio', 'Geleira', 'Arco-Íris', 'Bateria'
+            ];
+        }
         this.secretWord = words[Math.floor(Math.random() * words.length)];
     }
 
@@ -1429,20 +1643,36 @@ class GameQuemSouEu {
             this.team2List = teams[1].players;
         } else {
             const shuf = shuffle([...all]);
-            this.t1Guesser = shuf[0] || { id: 'p_g1', name: 'Guerreiro 1' };
+            this.t1Guesser = shuf[0] || { id: 'p_g1', name: 'Jogador 1' };
             this.t1Clue = shuf[1] || { id: 'p_c1', name: 'Parceiro 1' };
-            this.t2Guesser = shuf[2] || { id: 'p_g2', name: 'Guerreiro 2' };
+            this.t2Guesser = shuf[2] || { id: 'p_g2', name: 'Jogador 2' };
             this.t2Clue = shuf[3] || { id: 'p_c2', name: 'Parceiro 2' };
             this.team1List = [this.t1Guesser, this.t1Clue];
             this.team2List = [this.t2Guesser, this.t2Clue];
         }
 
-        const pool = shuffle([
-            'Neymar', 'Batman', 'Silvio Santos', 'Cachorro', 'Homem-Aranha', 
-            'Faustão', 'Bob Esponja', 'Coringa', 'Galinha', 'Shrek', 
-            'Albert Einstein', 'Pikachu', 'Monalisa', 'Chaves', 'Voldemort',
-            'Mário Bros', 'Barbie', 'Darth Vader', 'Gato', 'Goku'
-        ]);
+        let pool = [];
+        if (config?.themes && config.themes.length > 0 && window.categoriasIniciais) {
+            config.themes.forEach(cat => {
+                if (window.categoriasIniciais[cat]) pool.push(...window.categoriasIniciais[cat]);
+            });
+        }
+        if (pool.length < 2) {
+            pool = [
+                'Neymar', 'Batman', 'Silvio Santos', 'Cachorro', 'Homem-Aranha', 
+                'Faustão', 'Bob Esponja', 'Coringa', 'Galinha', 'Shrek', 
+                'Albert Einstein', 'Pikachu', 'Monalisa', 'Chaves', 'Voldemort',
+                'Mário Bros', 'Barbie', 'Darth Vader', 'Gato', 'Goku',
+                'Cristiano Ronaldo', 'Messi', 'Harry Potter', 'Elsa de Frozen', 'Minion',
+                'Capitão América', 'Thor', 'Homem de Ferro', 'Wolverine', 'Deadpool',
+                'Casimiro', 'Luva de Pedreiro', 'Manoel Gomes', 'Gretchen', 'Nazaré Tedesco',
+                'Seu Madruga', 'Kiko', 'Chapolin Colorado', 'Pica-Pau', 'Scooby-Doo',
+                'Mickey Mouse', 'Sonic', 'Naruto', 'Luffy', 'Tarzan',
+                'Cleópatra', 'Napoleão Bonaparte', 'Sherlock Holmes', 'Drácula', 'Frankenstein',
+                'Papai Noel', 'Fada do Dente', 'T-Rex', 'Capivara', 'Urso Panda'
+            ];
+        }
+        pool = shuffle(pool);
         this.w1 = pool[0];
         this.w2 = pool[1];
         this.elapsed = 0;
@@ -1451,7 +1681,7 @@ class GameQuemSouEu {
 
     start() {
         appCore.nav('screen-game-board');
-        document.getElementById('gb-title').innerText = 'Quem Sou Eu (Batalha em Equipes)';
+        document.getElementById('gb-title').innerText = 'Quem Sou Eu (Duelo em Equipes)';
         this.renderDuel();
     }
 
@@ -1575,13 +1805,29 @@ class GameMegaSenha {
         this.t1 = teams[0]?.players?.length ? teams[0] : { id: 0, players: [this.allPlayers[0] || { id: 'p1', name: 'Time 1' }] };
         this.t2 = teams[1]?.players?.length ? teams[1] : { id: 1, players: [this.allPlayers[1] || { id: 'p2', name: 'Time 2' }] };
         
-        this.activeTeam = 0; // 0 = Time 1, 1 = Time 2
         this.teamScores = [0, 0];
-        this.words = shuffle([
-            'Astronauta', 'Chocolate', 'Vulcão', 'Castelo', 'Hospital', 
-            'Bicicleta', 'Submarino', 'Dinossauro', 'Canguru', 'Pirata', 
-            'Helicóptero', 'Microfone', 'Pizzaria', 'Fantasmas', 'Diamante'
-        ]);
+
+        let words = [];
+        if (config?.themes && config.themes.length > 0 && window.categoriasIniciais) {
+            config.themes.forEach(cat => {
+                if (window.categoriasIniciais[cat]) words.push(...window.categoriasIniciais[cat]);
+            });
+        }
+        if (words.length < 5) {
+            words = [
+                'Astronauta', 'Chocolate', 'Vulcão', 'Castelo', 'Hospital', 
+                'Bicicleta', 'Submarino', 'Dinossauro', 'Canguru', 'Pirata', 
+                'Helicóptero', 'Microfone', 'Pizzaria', 'Fantasmas', 'Diamante',
+                'Cemitério', 'Paraquedas', 'Laboratório', 'Telescópio', 'Dentista',
+                'Circo', 'Supermercado', 'Prisão', 'Cassino', 'Biblioteca',
+                'Vampiro', 'Múmia', 'Tornado', 'Terremoto', 'Cachoeira',
+                'Fogueira', 'Espelho', 'Violão', 'Bateria', 'Saxofone',
+                'Esqueleto', 'Cofre', 'Navio', 'Farol', 'Tubarão',
+                'Espada', 'Coroa', 'Varinha Mágica', 'Carrossel', 'Pinguim',
+                'Tartaruga', 'Geleira', 'Planeta', 'Satélite', 'Mágico'
+            ];
+        }
+        this.words = shuffle(words);
         this.wordIdx = 0;
         this.maxWords = 5;
         this.mordaca = false;
@@ -1590,48 +1836,40 @@ class GameMegaSenha {
     start() {
         appCore.nav('screen-game-board');
         document.getElementById('gb-title').innerText = 'Mega Senha (Duelo)';
-        document.getElementById('btn-in-game-store').style.display = 'block';
         this.renderTurn();
     }
 
     renderTurn() {
         const w = this.words[this.wordIdx % this.words.length];
-        const teamName = this.activeTeam === 0 ? 'TIME 1' : 'TIME 2';
-        const teamColor = this.activeTeam === 0 ? 'var(--pop-cyan)' : 'var(--pop-yellow)';
-        const teamPlayers = this.activeTeam === 0 ? this.t1.players.map(p => p.name).join(' & ') : this.t2.players.map(p => p.name).join(' & ');
 
         document.getElementById('gb-content').innerHTML = `
-            <div class="game-box-display word-card-flip" style="padding:18px 14px; width:100%; max-width:360px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-weight:900; font-size:0.85em;">
-                    <span style="color:var(--pop-cyan);">Time 1: ${this.teamScores[0]} Pts</span>
-                    <span style="color:var(--pop-yellow);">Palavra ${this.wordIdx + 1} de ${this.maxWords}</span>
-                    <span style="color:var(--pop-magenta);">Time 2: ${this.teamScores[1]} Pts</span>
+            <div class="game-box-display word-card-flip" style="padding:20px 14px; width:100%; max-width:360px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; font-weight:900; font-size:0.85em;">
+                    <span style="color:var(--pop-cyan); background:rgba(0,229,255,0.12); padding:4px 10px; border-radius:999px; border:1px solid rgba(0,229,255,0.3);">TIME 1: ${this.teamScores[0]}</span>
+                    <span style="color:var(--pop-yellow); font-size:0.8em; letter-spacing:1px; text-transform:uppercase;">Senha ${this.wordIdx + 1} de ${this.maxWords}</span>
+                    <span style="color:var(--pop-magenta); background:rgba(255,42,133,0.12); padding:4px 10px; border-radius:999px; border:1px solid rgba(255,42,133,0.3);">TIME 2: ${this.teamScores[1]}</span>
                 </div>
                 
                 <div class="word-card-inner" id="ms-card-inner">
-                    <div style="background:${teamColor}; color:#000; font-weight:900; font-size:0.82em; padding:3px 12px; border-radius:12px; display:inline-block; margin-bottom:6px;">
-                        VEZ DO ${teamName} (${teamPlayers})
-                    </div>
-                    <p style="color:var(--ink-muted); font-size:0.75em; font-weight:800; margin:0 0 6px 0;">Oradores veem a senha e dão 1 palavra de dica:</p>
-                    <div style="font-size:2.8em; font-weight:900; color:#fff; margin:10px 0; text-shadow:3px 3px 0 var(--ink-black); line-height:1.1;">
+                    <div style="font-size:3.2em; font-weight:900; color:#fff; margin:18px 0; text-shadow:0 3px 12px rgba(0,0,0,0.6); line-height:1.15; letter-spacing:-0.02em;">
                         ${w}
                     </div>
                     <div id="ms-stamp" class="word-stamp-badge" style="display:none;"></div>
                 </div>
             </div>
 
-            <div style="display:flex; flex-direction:column; gap:8px; max-width:340px; width:100%; margin-top:10px;">
-                <button class="btn btn-success" style="font-size:0.95em;" onclick="minigames.hitWord()">
-                    🎯 ${teamName} ACERTOU! (+10)
-                </button>
-                <div style="display:flex; gap:8px;">
-                    <button class="btn btn-dark" style="flex:1; font-size:0.82em;" onclick="minigames.passTurn()">
-                        ❌ ERROU (PASSA A VEZ) ➔
+            <div style="display:flex; flex-direction:column; gap:10px; max-width:340px; width:100%; margin-top:14px;">
+                <div style="display:flex; gap:10px;">
+                    <button class="btn btn-primary" style="flex:1; font-size:0.95em; padding:14px 8px; font-weight:900;" onclick="minigames.hitWord(0)">
+                        TIME 1 ACERTOU! (+10)
                     </button>
-                    <button class="btn btn-danger" style="width:100px; font-size:0.82em;" onclick="minigames.skipWord()">
-                        Pular ⏩
+                    <button class="btn btn-warning" style="flex:1; font-size:0.95em; padding:14px 8px; font-weight:900; color:#000;" onclick="minigames.hitWord(1)">
+                        TIME 2 ACERTOU! (+10)
                     </button>
                 </div>
+                <button class="btn btn-dark" style="font-size:0.85em; padding:10px;" onclick="minigames.skipWord()">
+                    Pular Senha ⏩
+                </button>
             </div>
         `;
     }
@@ -1661,7 +1899,10 @@ class GameMegaSenha {
 
     handleAction(type, payload) {
         if (type === 'WORD_HIT') {
-            this.teamScores[this.activeTeam] += 10;
+            const teamIdx = payload !== undefined ? Number(payload) : 0;
+            if (this.teamScores[teamIdx] !== undefined) {
+                this.teamScores[teamIdx] += 10;
+            }
             this.wordIdx++;
             window.playSound('success');
             window.hapticTap();
@@ -1671,7 +1912,6 @@ class GameMegaSenha {
                 this.renderTurn();
             }
         } else if (type === 'PASS_TURN') {
-            this.activeTeam = 1 - this.activeTeam;
             window.playSound('nav');
             window.hapticTap();
             this.renderTurn();
@@ -1711,26 +1951,37 @@ class GameCompleta {
             'Animes & Séries': ['Demon Slayer', 'Naruto', 'One Piece', 'Stranger Things', 'Breaking Bad', 'Game of Thrones', 'Round 6', 'Pokémon'],
             'Filmes Clássicos': ['Titanic', 'Vingadores', 'Harry Potter', 'O Rei Leão', 'Star Wars', 'Shrek', 'Jurassic Park', 'Avatar'],
             'Super-Heróis': ['Homem-Aranha', 'Batman', 'Superman', 'Homem de Ferro', 'Coringa', 'Mulher-Maravilha', 'Hulk', 'Thor'],
-            'Lugares & Cidades': ['Paris', 'Praia', 'Hospital', 'Navio Pirata', 'Estação Espacial', 'Cinema', 'Escola', 'Cassino']
+            'Lugares & Cidades': ['Paris', 'Praia', 'Hospital', 'Navio Pirata', 'Estação Espacial', 'Cinema', 'Escola', 'Cassino'],
+            'Petiscos & Boteco': ['Coxinha', 'Pastel', 'Torresmo', 'Bolinho de Bacalhau', 'Batata Frita', 'Mandioca', 'Calabresa', 'Amendoim'],
+            'Desenhos & Animações': ['Toy Story', 'Shrek', 'Procurando Nemo', 'Monstros SA', 'Kung Fu Panda', 'Madagascar', 'Os Incríveis', 'Divertida Mente'],
+            'Memes Brasileiros': ['Luva de Pedreiro', 'Casimiro', 'Caneta Azul', 'Bora Bill', 'Gretchen', 'Nazaré Confusa', 'Bambam', 'Tiringa'],
+            'Jogos de Videogame': ['GTA', 'Minecraft', 'FIFA', 'Super Mario', 'God of War', 'The Last of Us', 'Fortnite', 'Counter Strike'],
+            'Coisas que Dão Pavor': ['Fantasma', 'Conta de Luz', 'Palhaço', 'Bebê Chorando no Avião', 'Ex Namorado(a)', 'Cobra', 'Dentista', 'Agulha'],
+            'Dia de Praia': ['Cadeira de Sol', 'Guarda-Sol', 'Protetor Solar', 'Cerveja Gelada', 'Biscoito Globo', 'Água de Coco', 'Prancha de Surf', 'Castelo de Areia']
         };
-        const catKeys = Object.keys(pool);
-        this.category = catKeys[Math.floor(Math.random() * catKeys.length)];
-        this.deck = shuffle(pool[this.category]).slice(0, 8);
+        
+        let availableCats = Object.keys(pool);
+        if (config?.themes && config.themes.length > 0) {
+            const matched = availableCats.filter(c => config.themes.includes(c));
+            if (matched.length > 0) availableCats = matched;
+        }
+
+        this.category = availableCats[Math.floor(Math.random() * availableCats.length)];
+        this.deck = shuffle(pool[this.category] || pool['Filmes Clássicos']).slice(0, 8);
         this.wordIdx = 0;
-        this.duration = 40;
-        this.remaining = 40;
+        this.duration = config?.time || 40;
+        this.remaining = this.duration;
         this.ended = false;
     }
 
     start() {
         appCore.nav('screen-game-board');
-        document.getElementById('gb-title').innerText = 'Completa (40s Speedrun)';
-        document.getElementById('btn-in-game-store').style.display = 'block';
+        document.getElementById('gb-title').innerText = `Completa (${this.duration}s Speedrun)`;
         this.startTeamRun();
     }
 
     startTeamRun() {
-        this.wordIdx = 0;
+        this.activeDeck = [...this.deck];
         this.remaining = this.duration;
         this.ctx.timer.start(this.duration);
         this.renderWord();
@@ -1739,20 +1990,21 @@ class GameCompleta {
     renderWord() {
         const team = this.teams[this.teamIdx];
         const teamName = this.teams.length > 1 ? `EQUIPE ${this.teamIdx + 1}` : 'EQUIPE';
-        const teamMembers = team?.players?.map(p => p.name).join(', ') || 'Guerreiros';
-        const currentWord = this.deck[this.wordIdx] || 'Fim das Palavras';
+        const teamMembers = team?.players?.map(p => p.name).join(', ') || 'Jogadores';
+        const currentWord = this.activeDeck[0] || 'Todas Acertadas!';
+        const totalWords = this.deck.length;
 
         document.getElementById('gb-content').innerHTML = `
             <div class="game-box-display word-card-flip" style="padding:18px 14px; width:100%; max-width:360px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                     <span style="font-size:0.85em; font-weight:900; color:var(--pop-cyan);">${teamName}</span>
                     <span id="completa-timer" class="timer-number" style="font-size:1.8em; color:var(--pop-magenta);">${Math.ceil(this.remaining)}s</span>
-                    <span style="font-size:0.85em; font-weight:900; color:var(--pop-yellow);">Acertos: ${this.teamScores[this.teamIdx]}/8</span>
+                    <span style="font-size:0.85em; font-weight:900; color:var(--pop-yellow);">Acertos: ${this.teamScores[this.teamIdx]}/${totalWords}</span>
                 </div>
                 
                 <div style="font-size:0.75em; color:var(--ink-muted); font-weight:800; margin-bottom:6px;">Membros: ${teamMembers}</div>
                 <div style="background:rgba(0,229,255,0.08); border:2px solid var(--pop-cyan); border-radius:14px; padding:12px; margin:8px 0;">
-                    <div style="font-size:0.8em; font-weight:900; color:var(--pop-yellow);">PALAVRA ${this.wordIdx + 1} DE 8:</div>
+                    <div style="font-size:0.8em; font-weight:900; color:var(--pop-yellow);">FALEM UMA PALAVRA CADA:</div>
                     <div style="font-size:2.2em; font-weight:900; color:#fff; text-shadow:2px 2px 0 #000; margin:6px 0; min-height:44px; display:flex; align-items:center; justify-content:center;">
                         ${currentWord}
                     </div>
@@ -1789,9 +2041,11 @@ class GameCompleta {
         if (this.teamIdx + 1 < this.teams.length) {
             this.teamIdx++;
             window.playSound('victory');
+            const hits = this.teamScores[this.teamIdx - 1] || 0;
+            const wordLabel = hits === 1 ? 'palavra' : 'palavras';
             window.showCustomAlert(
                 `Fim da Equipe ${this.teamIdx}!`, 
-                `Eles acertaram ${this.teamScores[this.teamIdx - 1]} palavras!\nAgora é a vez da Equipe ${this.teamIdx + 1} (40s)!`, 
+                `A equipe acertou <b>${hits}</b> ${wordLabel}!<br>Agora é a vez da Equipe ${this.teamIdx + 1} (40s)!`, 
                 '⏱️'
             );
             setTimeout(() => this.startTeamRun(), 1200);
@@ -1824,24 +2078,22 @@ class GameCompleta {
         if (this.ended) return;
         if (type === 'WORD_HIT') {
             this.teamScores[this.teamIdx]++;
-            this.wordIdx++;
+            this.activeDeck.shift();
             window.playSound('success');
             window.hapticTap();
-            if (this.wordIdx >= this.deck.length) {
+            if (this.activeDeck.length === 0) {
                 this.ctx.timer.stop();
                 this.finishTeamRun();
             } else {
                 this.renderWord();
             }
         } else if (type === 'WORD_SKIP') {
-            this.wordIdx++;
-            window.playBeep(false);
-            if (this.wordIdx >= this.deck.length) {
-                this.ctx.timer.stop();
-                this.finishTeamRun();
-            } else {
-                this.renderWord();
+            if (this.activeDeck.length > 1) {
+                const skipped = this.activeDeck.shift();
+                this.activeDeck.push(skipped);
             }
+            window.playBeep(false);
+            this.renderWord();
         }
     }
 }
@@ -1854,37 +2106,68 @@ class GameMimica {
         this.ctx = ctx;
         this.teams = teams;
         this.players = teams[0]?.players || window.GIW.store.players || [];
-        this.actor = this.players[Math.floor(Math.random() * this.players.length)] || { id: 'p_actor', name: 'Mímico' };
+        this.actorQueue = shuffle([...this.players]);
+        this.actorIdx = 0;
+        this.actor = this.actorQueue[0] || { id: 'p_actor', name: 'Mímico' };
 
-        const easyPool = shuffle([
+        this.easyPool = [
             { t: "Fácil (+10)", w: "Escovando os Dentes", p: 10 },
             { t: "Fácil (+10)", w: "Tocando Bateria", p: 10 },
             { t: "Fácil (+10)", w: "Comendo Pizza Quente", p: 10 },
-            { t: "Fácil (+10)", w: "Tirando Selfie no Espelho", p: 10 }
-        ]);
-        const medPool = shuffle([
+            { t: "Fácil (+10)", w: "Tirando Selfie no Espelho", p: 10 },
+            { t: "Fácil (+10)", w: "Passeando com Cachorro Bravo", p: 10 },
+            { t: "Fácil (+10)", w: "Dormindo e Roncando no Ônibus", p: 10 },
+            { t: "Fácil (+10)", w: "Limpando o Chão com Rodo", p: 10 },
+            { t: "Fácil (+10)", w: "Andando de Patins ou Skate", p: 10 },
+            { t: "Fácil (+10)", w: "Tomando Banho Gelado", p: 10 },
+            { t: "Fácil (+10)", w: "Passando Protetor Solar nas Costas", p: 10 },
+            { t: "Fácil (+10)", w: "Batendo Pênalti na Copa", p: 10 },
+            { t: "Fácil (+10)", w: "Espirrando e Segurando o Espirro", p: 10 },
+            { t: "Fácil (+10)", w: "Tentando Matar um Mosquito", p: 10 },
+            { t: "Fácil (+10)", w: "Pesando na Balança da Farmácia", p: 10 },
+            { t: "Fácil (+10)", w: "Chorando Cortando Cebola", p: 10 }
+        ];
+        this.medPool = [
             { t: "Médio (+20)", w: "Zumbi Dançando Balé", p: 20 },
             { t: "Médio (+20)", w: "Pescador Pegando Tubarão", p: 20 },
             { t: "Médio (+20)", w: "Astronauta Sem Gravidade", p: 20 },
-            { t: "Médio (+20)", w: "Lutador de Sumô com Câimbra", p: 20 }
-        ]);
-        const hardPool = shuffle([
+            { t: "Médio (+20)", w: "Lutador de Sumô com Câimbra", p: 20 },
+            { t: "Médio (+20)", w: "Gato se Lambendo e Assustado com Pepino", p: 20 },
+            { t: "Médio (+20)", w: "Pintor Renascentista Nervoso", p: 20 },
+            { t: "Médio (+20)", w: "Pessoa Pisando em Lego Descalça", p: 20 },
+            { t: "Médio (+20)", w: "Padre Exorcista em Pânico", p: 20 },
+            { t: "Médio (+20)", w: "Influencer Fazendo Tour pela Casa", p: 20 },
+            { t: "Médio (+20)", w: "Robô com Bateria Fraca Desligando", p: 20 },
+            { t: "Médio (+20)", w: "Homem das Cavernas Descobrindo o Fogo", p: 20 },
+            { t: "Médio (+20)", w: "Maestro Regendo Orquestra Desafinada", p: 20 },
+            { t: "Médio (+20)", w: "Passageiro de Montanha-Russa Desesperado", p: 20 },
+            { t: "Médio (+20)", w: "Vampiro Tomando Banho de Sol", p: 20 }
+        ];
+        this.hardPool = [
             { t: "Difícil (+30)", w: "Cirurgião em Montanha-Russa", p: 30 },
             { t: "Difícil (+30)", w: "Super-Herói Lavando Roupa", p: 30 },
-            { t: "Difícil (+30)", w: "Ninja Trocando Fralda de Bebê", p: 30 }
-        ]);
+            { t: "Difícil (+30)", w: "Ninja Trocando Fralda de Bebê", p: 30 },
+            { t: "Difícil (+30)", w: "Piranha no Aquário Pedindo Socorro", p: 30 },
+            { t: "Difícil (+30)", w: "Detetive Seguindo a Própria Sombra", p: 30 },
+            { t: "Difícil (+30)", w: "Astronauta Pisando num Chiclete na Lua", p: 30 },
+            { t: "Difícil (+30)", w: "Galinha Apaixonada por um Ovo de Páscoa", p: 30 },
+            { t: "Difícil (+30)", w: "Papai Noel Entalado na Chaminé Apertada", p: 30 },
+            { t: "Difícil (+30)", w: "Fantasma com Medo do Próprio Lençol", p: 30 },
+            { t: "Difícil (+30)", w: "Múmia se Desmanchando numa Ventania", p: 30 }
+        ];
 
-        this.cardOptions = [easyPool[0], medPool[0], hardPool[0]];
+        this.cardOptions = [shuffle(this.easyPool)[0], shuffle(this.medPool)[0], shuffle(this.hardPool)[0]];
         this.chosenCard = null;
-        this.duration = 60;
-        this.remaining = 60;
+        this.duration = config?.time || 60;
+        this.remaining = this.duration;
+        this.mutations = [];
+        this.roundSummaries = [];
         this.ended = false;
     }
 
     start() {
         appCore.nav('screen-game-board');
-        document.getElementById('gb-title').innerText = 'Mímica';
-        document.getElementById('btn-in-game-store').style.display = 'none';
+        document.getElementById('gb-title').innerText = `Mímica (${this.duration}s)`;
         this.renderSelection();
     }
 
@@ -1901,7 +2184,10 @@ class GameMimica {
 
         document.getElementById('gb-content').innerHTML = `
             <div class="game-box-display" style="width:100%; max-width:360px;">
-                <p style="color:var(--pop-cyan); font-weight:900; font-size:0.95em; margin-bottom:4px;">ATOR DA VEZ: ${this.actor.name.toUpperCase()}</p>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                    <span style="color:var(--pop-cyan); font-weight:900; font-size:0.95em;">ATOR: ${this.actor.name.toUpperCase()}</span>
+                    <span style="color:var(--pop-yellow); font-size:0.8em; font-weight:800;">${this.actorIdx + 1}/${this.actorQueue.length}</span>
+                </div>
                 <p style="font-size:0.8em; color:var(--ink-muted); font-weight:800; margin-bottom:12px;">Escolha 1 das 3 cartas. O risco e os pontos são seus!</p>
                 ${optionCards}
             </div>
@@ -1912,6 +2198,7 @@ class GameMimica {
         this.chosenCard = this.cardOptions[idx] || this.cardOptions[0];
         window.playSound('pop');
         window.hapticTap();
+        this.remaining = this.duration;
         this.ctx.timer.start(this.duration);
         this.renderActing();
     }
@@ -1932,7 +2219,7 @@ class GameMimica {
                     ✅ ALGUÉM ADIVINHOU!
                 </button>
                 <button class="btn btn-dark" style="font-size:0.85em;" onclick="minigames.skipWord()">
-                    Desistir / Tempo Esgotado ➔
+                    Desistir / Passar a Vez ➔
                 </button>
             </div>
         `;
@@ -1944,28 +2231,81 @@ class GameMimica {
         const el = document.getElementById('mimica-timer');
         if (el) el.innerText = `${Math.ceil(remaining)}s`;
         if (remaining <= 0) {
-            this.ended = true;
             this.ctx.timer.stop();
             window.playKaboom();
-            this.ctx.complete({
-                title: 'Tempo Esgotado!',
-                titleColor: 'var(--pop-yellow)',
-                detailHTML: `<p style="font-weight:900; font-size:1.15em;">O tempo de 60s acabou! Ninguém pontuou nesta rodada.</p>`,
-                scoreMutations: [],
-                celebrateWithConfetti: false
-            });
+            this.advanceTurn(null);
         }
+    }
+
+    advanceTurn(guesser) {
+        if (guesser && this.chosenCard) {
+            const cardPts = this.chosenCard.p;
+            this.mutations.push({ playerId: this.actor.id, baseDelta: cardPts });
+            this.mutations.push({ playerId: guesser.id, baseDelta: 10 });
+            this.roundSummaries.push(`<b>${this.actor.name}</b> (+${cardPts}) atuou e <b>${guesser.name}</b> (+10) adivinhou: <i>${this.chosenCard.w}</i>`);
+        } else {
+            this.roundSummaries.push(`<b>${this.actor.name}</b> não teve a mímica adivinhada (<i>${this.chosenCard?.w || 'Desconhecida'}</i>).`);
+        }
+
+        if (this.actorIdx + 1 < this.actorQueue.length) {
+            this.actorIdx++;
+            this.actor = this.actorQueue[this.actorIdx];
+            this.cardOptions = [shuffle(this.easyPool)[0], shuffle(this.medPool)[0], shuffle(this.hardPool)[0]];
+            this.chosenCard = null;
+            this.renderIntermission();
+        } else {
+            this.finishAll();
+        }
+    }
+
+    renderIntermission() {
+        const nextActor = this.actor;
+        document.getElementById('gb-content').innerHTML = `
+            <div class="game-box-display">
+                <span style="color:var(--pop-green); font-weight:900; font-size:0.9em; text-transform:uppercase;">RODADA CONCLUÍDA!</span>
+                <div style="font-size:1.6em; font-weight:900; color:var(--pop-yellow); margin:12px 0;">
+                    Próximo Ator da Mesa:<br><b>${nextActor.name.toUpperCase()}</b>
+                </div>
+                <p style="font-size:0.85em; color:var(--ink-muted); font-weight:800;">
+                    Passe o celular para <b>${nextActor.name}</b> escolher a carta e atuar!
+                </p>
+            </div>
+            <button class="btn btn-primary" style="max-width:320px; margin-top:10px;" onclick="minigames.nextMimicaActor()">
+                VEZ DE ${nextActor.name.toUpperCase()} ➔
+            </button>
+        `;
+    }
+
+    finishAll() {
+        this.ended = true;
+        this.ctx.timer.stop();
+        window.playSound('victory');
+        window.GIW.bus.emit('fx:juice', { type: 'confetti', particleCount: 90 });
+
+        this.ctx.complete({
+            title: 'Fim da Mímica da Mesa! 🎭',
+            titleColor: 'var(--pop-green)',
+            detailHTML: `
+                <div style="font-size:0.9em; text-align:left; line-height:1.4; margin:8px 0;">
+                    ${this.roundSummaries.map(s => `<p style="margin:4px 0;">• ${s}</p>`).join('')}
+                </div>
+            `,
+            scoreMutations: this.mutations,
+            celebrateWithConfetti: this.mutations.length > 0
+        });
     }
 
     handleAction(type, payload) {
         if (this.ended) return;
         if (type === 'PICK_MIMICA_CARD') {
             this.pickCard(Number(payload));
+        } else if (type === 'NEXT_MIMICA_ACTOR') {
+            this.renderSelection();
         } else if (type === 'WORD_HIT') {
             this.ctx.timer.stop();
             const cardPts = this.chosenCard ? this.chosenCard.p : 10;
             
-            // Abre o modal pop para selecionar quem adivinhou na mesa
+            // Abre o seletor para marcar quem da mesa acertou
             const guesserCandidates = (window.GIW.store.players || []).filter(p => p.id !== this.actor.id);
             window.showPlayerSelectorModal({
                 icon: '🤹',
@@ -1974,35 +2314,15 @@ class GameMimica {
                 players: guesserCandidates.length > 0 ? guesserCandidates : window.GIW.store.players,
                 cancelable: false,
                 onSelect: (guesser) => {
-                    this.ended = true;
-                    window.playSound('victory');
-                    window.GIW.bus.emit('fx:juice', { type: 'confetti', particleCount: 90 });
-
-                    const mutations = [
-                        { playerId: this.actor.id, baseDelta: cardPts },
-                        { playerId: guesser.id, baseDelta: 10 }
-                    ];
-
-                    this.ctx.complete({
-                        title: 'Mímica Desvendada! 🎭',
-                        titleColor: 'var(--pop-green)',
-                        detailHTML: `<p style="font-weight:900; font-size:1.15em;">Carta: <b>${this.chosenCard.w}</b><br><b style="color:var(--pop-yellow);">${this.actor.name}</b> faturou <b>+${cardPts} Pts</b> pelo risco!<br><b style="color:var(--pop-green);">${guesser.name}</b> foi rápido e faturou <b>+10 Pts</b>!</p>`,
-                        scoreMutations: mutations,
-                        celebrateWithConfetti: true
-                    });
+                    window.playSound('success');
+                    window.hapticTap();
+                    this.advanceTurn(guesser);
                 }
             });
         } else if (type === 'WORD_SKIP') {
-            this.ended = true;
             this.ctx.timer.stop();
             window.playSound('badum');
-            this.ctx.complete({
-                title: 'Mímica Não Revelada',
-                titleColor: 'var(--pop-magenta)',
-                detailHTML: `<p style="font-weight:900; font-size:1.15em;">A mímica era: <b>${this.chosenCard?.w || 'Desconhecida'}</b>. Nenhum ponto ganho.</p>`,
-                scoreMutations: [],
-                celebrateWithConfetti: false
-            });
+            this.advanceTurn(null);
         }
     }
 }
@@ -2010,6 +2330,31 @@ class GameMimica {
 // ----------------------------------------------------
 // 12. STOP DE RODA (DECAY SUAVE & ELIMINAÇÃO CONTÍNUA)
 // ----------------------------------------------------
+const STOP_CATEGORY_DATA = [
+    { cat: 'Comida ou Fruta', letters: ['A', 'B', 'C', 'F', 'G', 'L', 'M', 'P', 'S', 'T', 'U'] },
+    { cat: 'Animal Conhecido', letters: ['A', 'C', 'E', 'G', 'J', 'L', 'M', 'O', 'P', 'R', 'S', 'T', 'U', 'Z'] },
+    { cat: 'Nome de Cidade ou País', letters: ['A', 'B', 'C', 'E', 'F', 'G', 'I', 'J', 'L', 'M', 'P', 'R', 'S'] },
+    { cat: 'Objeto de Casa', letters: ['A', 'B', 'C', 'E', 'F', 'G', 'L', 'M', 'P', 'Q', 'R', 'S', 'T', 'V'] },
+    { cat: 'Filme ou Série', letters: ['A', 'B', 'C', 'D', 'F', 'G', 'H', 'J', 'L', 'M', 'O', 'P', 'R', 'S', 'T', 'V'] },
+    { cat: 'Profissão / Ocupação', letters: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'J', 'M', 'P', 'S', 'V'] },
+    { cat: 'Marca Famosa', letters: ['A', 'B', 'C', 'D', 'F', 'G', 'H', 'L', 'M', 'N', 'P', 'R', 'S', 'T', 'V'] },
+    { cat: 'Bebida Gelada', letters: ['A', 'C', 'G', 'L', 'R', 'S', 'V'] },
+    { cat: 'Banda ou Cantor(a)', letters: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'J', 'L', 'M', 'N', 'P', 'R', 'S', 'T'] },
+    { cat: 'Parte do Corpo Humano', letters: ['B', 'C', 'D', 'J', 'M', 'N', 'O', 'P', 'Q', 'T'] },
+    { cat: 'Sobremesa ou Doce', letters: ['B', 'C', 'D', 'G', 'M', 'P', 'S', 'T'] },
+    { cat: 'Meio de Transporte', letters: ['A', 'B', 'C', 'H', 'M', 'N', 'O', 'P', 'T'] },
+    { cat: 'Esporte ou Atividade Física', letters: ['B', 'C', 'F', 'G', 'J', 'N', 'P', 'R', 'S', 'T', 'V'] },
+    { cat: 'Item de Supermercado', letters: ['A', 'B', 'C', 'D', 'F', 'G', 'L', 'M', 'O', 'P', 'Q', 'R', 'S', 'T'] },
+    { cat: 'Coisa que se Vê no Trânsito', letters: ['A', 'B', 'C', 'F', 'M', 'O', 'P', 'S', 'T'] },
+    { cat: 'Eletrodoméstico', letters: ['A', 'B', 'C', 'F', 'G', 'L', 'M', 'S', 'T', 'V'] },
+    { cat: 'Flor ou Planta', letters: ['B', 'C', 'G', 'J', 'M', 'O', 'P', 'R', 'S', 'V'] },
+    { cat: 'Roupa ou Acessório', letters: ['B', 'C', 'G', 'L', 'M', 'O', 'P', 'R', 'S', 'T', 'V'] },
+    { cat: 'Personagem de Desenho ou Cinema', letters: ['B', 'C', 'D', 'G', 'H', 'M', 'P', 'S', 'T', 'Z'] },
+    { cat: 'Comida de Boteco', letters: ['B', 'C', 'E', 'F', 'M', 'P', 'Q', 'T'] },
+    { cat: 'Instrumento Musical', letters: ['B', 'C', 'F', 'G', 'H', 'P', 'S', 'T', 'V'] },
+    { cat: 'Aplicativo de Celular', letters: ['F', 'G', 'I', 'N', 'S', 'T', 'U', 'W', 'Y'] }
+];
+
 class GameStop {
     constructor(config, teams, ctx) {
         this.ctx = ctx;
@@ -2017,21 +2362,17 @@ class GameStop {
         this.alivePlayers = [...this.players];
         this.eliminated = [];
 
-        this.categories = [
-            'Comida ou Fruta', 'Animal Selvagem', 'Nome de Cidade ou País',
-            'Objeto de Casa', 'Filme ou Série', 'Profissão / Ocupação',
-            'Marca Famosa', 'Bebida Gelada', 'Cor ou Estampa', 'Coisa de Praia'
-        ];
-        this.letters = 'ABCDEFGHIJKLMNOPRSTUV';
-        this.category = this.categories[Math.floor(Math.random() * this.categories.length)];
-        this.letter = this.letters[Math.floor(Math.random() * this.letters.length)];
-        
-        this.currIdx = 0;
-        this.baseLimit = 10.0;
-        this.timeLimit = 10.0;
-        this.timeLeft = 10.0;
+        const initial = this.pickRandomRound();
+        this.category = initial.cat;
+        this.letter = initial.letter;
         this.ended = false;
         this.isIntermission = false;
+    }
+
+    pickRandomRound() {
+        const entry = STOP_CATEGORY_DATA[Math.floor(Math.random() * STOP_CATEGORY_DATA.length)];
+        const letter = entry.letters[Math.floor(Math.random() * entry.letters.length)];
+        return { cat: entry.cat, letter };
     }
 
     start() {
@@ -2042,58 +2383,59 @@ class GameStop {
 
     render() {
         if (this.isIntermission) return;
-        const currP = this.alivePlayers[this.currIdx % (this.alivePlayers.length || 1)] || { name: 'Guerreiro', id: 'p_none' };
+        const aliveBadges = this.alivePlayers.map(p => 
+            `<span style="display:inline-block; padding:4px 10px; border-radius:12px; background:rgba(255,255,255,0.08); font-size:0.8em; font-weight:800; border:1px solid rgba(255,255,255,0.15); color:#fff;">${p.name}</span>`
+        ).join(' ');
+
         document.getElementById('gb-content').innerHTML = `
             <div class="game-box-display" style="width:100%; max-width:350px;">
-                <p style="color:var(--pop-cyan); font-weight:900; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">TEMA: ${this.category}</p>
-                <div style="font-size:0.8em; font-weight:800; color:var(--ink-muted); margin-bottom:6px;">Sobreviventes: ${this.alivePlayers.length} na roda</div>
-                <p style="font-weight:900; font-size:1.15em; color:var(--pop-yellow); margin-bottom:8px;">VEZ DE: <u>${currP.name}</u></p>
-                <div class="slot-letter-box">
+                <p style="color:var(--pop-cyan); font-weight:900; text-transform:uppercase; letter-spacing:1.5px; font-size:0.85em; margin-bottom:6px;">TEMA DA RODADA</p>
+                <h2 style="color:var(--pop-yellow); font-size:1.7em; font-weight:900; margin:4px 0 10px 0; line-height:1.15; text-transform:uppercase;">${this.category}</h2>
+                
+                <div class="slot-letter-box" style="margin:12px auto;">
                     <span class="slot-letter-number" id="stop-letter-num">${this.letter}</span>
                 </div>
-                <div id="stop-timer" class="timer-number" style="font-size:2.4em; color:var(--pop-magenta); margin-top:6px;">${this.timeLeft.toFixed(1)}s</div>
-                <p style="color:var(--ink-muted); font-size:0.75em; font-weight:800; margin-top:4px;">Tempo atual por turno: ${this.timeLimit.toFixed(1)}s (-0.3s/acerto)</p>
+
+                <p style="color:var(--ink-muted); font-size:0.85em; font-weight:800; margin:10px 0 4px 0;">
+                    Falem em sequência na roda uma palavra com a letra <b>"${this.letter}"</b>!
+                </p>
+                <div style="font-size:0.75em; color:var(--pop-cyan); font-weight:800; margin-bottom:12px;">
+                    Restam ${this.alivePlayers.length} jogadores na roda
+                </div>
+
+                <div style="display:flex; gap:6px; flex-wrap:wrap; justify-content:center;">
+                    ${aliveBadges}
+                </div>
             </div>
-            <button class="btn btn-warning" style="max-width:320px; margin-bottom:8px;" onclick="minigames.nextLetter()">🔄 FALEI! NOVA LETRA</button>
-            <button class="btn btn-danger btn-sm" style="max-width:320px;" onclick="minigames.triggerStopElimination()">TRAVOU! ELIMINAR 💀</button>
+
+            <div style="width:100%; max-width:330px; display:flex; flex-direction:column; gap:8px; margin-top:12px;">
+                <button class="btn btn-danger" style="padding:15px; font-size:1em; font-weight:900;" onclick="minigames.triggerStopElimination()">
+                    💀 ALGUÉM TRAVOU / REPETIU! ELIMINAR
+                </button>
+                <button class="btn btn-dark" style="padding:10px; font-size:0.8em;" onclick="minigames.sortearOutroTemaStop()">
+                    🎲 Trocar Tema ou Letra
+                </button>
+            </div>
         `;
     }
 
-    tick(delta) {
-        if (this.ended || this.isIntermission) return;
-        this.timeLeft = Math.max(0, this.timeLeft - delta);
-        const timerEl = document.getElementById('stop-timer');
-        if (timerEl) {
-            timerEl.innerText = `${this.timeLeft.toFixed(1)}s`;
-            if (this.timeLeft <= 3.0) {
-                timerEl.style.transform = 'scale(1.15)';
-                timerEl.style.color = 'var(--pop-magenta)';
-            }
-        }
-
-        if (this.timeLeft <= 0) {
-            this.handleTimeout();
-        }
-    }
-
-    handleTimeout() {
-        window.playKaboom();
-        window.vibrar(600);
-        window.GIW.bus.emit('fx:screenshake', { intensity: 'heavy', durationMs: 600 });
-        this.triggerElimination();
+    tick() {
+        // Stop de roda funciona no ritmo humano da mesa sem cronômetro de tela
     }
 
     triggerElimination() {
         this.isIntermission = true;
         window.showPlayerSelectorModal({
-            icon: '⏰',
+            icon: '💀',
             title: 'Quem Travou no Stop?',
-            subtitle: 'Esse guerreiro é eliminado. Os sobreviventes seguem com novo tema!',
+            subtitle: `Quem demorou a falar ou repetiu no tema "${this.category}"?`,
             players: this.alivePlayers,
             cancelable: false,
             onSelect: (victim) => {
                 this.alivePlayers = this.alivePlayers.filter(p => p.id !== victim.id);
                 this.eliminated.push(victim);
+                window.playKaboom();
+                window.vibrar(400);
 
                 if (this.alivePlayers.length > 1) {
                     this.showEliminationIntermission(victim);
@@ -2106,23 +2448,22 @@ class GameStop {
 
     showEliminationIntermission(victim) {
         window.playSound('badum');
-        const nextCategory = this.categories[Math.floor(Math.random() * this.categories.length)];
-        const nextLetter = this.letters[Math.floor(Math.random() * this.letters.length)];
+        const next = this.pickRandomRound();
 
         document.getElementById('gb-content').innerHTML = `
             <div class="game-box-display" style="width:100%; max-width:350px;">
                 <div style="font-size:3em; margin-bottom:6px;">💀</div>
-                <h3 style="color:var(--pop-magenta); margin:0 0 6px 0;">${victim.name.toUpperCase()} ELIMINADO!</h3>
+                <h3 style="color:var(--pop-magenta); margin:0 0 6px 0; font-weight:900;">${victim.name.toUpperCase()} ELIMINADO!</h3>
                 <p style="color:var(--ink-muted); font-size:0.85em; font-weight:800; margin-bottom:12px;">
-                    Restam <b>${this.alivePlayers.length} guerreiros</b> na disputa pelo topo!
+                    Restam <b>${this.alivePlayers.length} jogadores</b> na disputa!
                 </p>
-                <div style="background:rgba(0,229,255,0.08); border:1.5px dashed var(--pop-cyan); border-radius:12px; padding:10px;">
-                    <span style="font-size:0.75em; color:var(--pop-cyan); font-weight:900;">PRÓXIMO TEMA & LETRA:</span>
-                    <div style="font-size:1.15em; font-weight:900; color:#fff; margin-top:2px;">${nextCategory} (Letra: ${nextLetter})</div>
+                <div style="background:rgba(0,229,255,0.08); border:1.5px dashed var(--pop-cyan); border-radius:12px; padding:12px;">
+                    <span style="font-size:0.75em; color:var(--pop-cyan); font-weight:900; text-transform:uppercase;">PRÓXIMO TEMA & LETRA:</span>
+                    <div style="font-size:1.25em; font-weight:900; color:#fff; margin-top:4px;">${next.cat} (Letra: ${next.letter})</div>
                 </div>
             </div>
-            <button class="btn btn-primary" style="max-width:320px;" onclick="minigames.continueStopRound('${nextCategory}', '${nextLetter}')">
-                CONTINUAR BATALHA ➔
+            <button class="btn btn-primary" style="max-width:320px; padding:14px; margin-top:10px; font-weight:900;" onclick="minigames.continueStopRound('${next.cat}', '${next.letter}')">
+                CONTINUAR COM NOVO TEMA ➔
             </button>
         `;
     }
@@ -2130,9 +2471,6 @@ class GameStop {
     continueRound(nextCategory, nextLetter) {
         this.category = nextCategory;
         this.letter = nextLetter;
-        this.timeLimit = 10.0;
-        this.timeLeft = 10.0;
-        this.currIdx = 0;
         this.isIntermission = false;
         window.playSound('nav');
         window.hapticTap();
@@ -2162,19 +2500,17 @@ class GameStop {
 
     handleAction(type, payload) {
         if (this.ended) return;
-        if (type === 'NEXT_LETTER') {
-            window.hapticTap();
-            this.currIdx++;
-            // Decay suave de -0.3s por acerto
-            this.timeLimit = Math.max(4.0, this.timeLimit - 0.3);
-            this.timeLeft = this.timeLimit;
-            this.letter = this.letters[Math.floor(Math.random() * this.letters.length)];
-            window.playSound('typewriter');
-            this.render();
-        } else if (type === 'TRIGGER_STOP_ELIM') {
+        if (type === 'TRIGGER_STOP_ELIM') {
             this.triggerElimination();
         } else if (type === 'CONTINUE_STOP') {
             this.continueRound(payload.cat, payload.letter);
+        } else if (type === 'REROLL_STOP') {
+            const next = this.pickRandomRound();
+            this.category = next.cat;
+            this.letter = next.letter;
+            window.playSound('pop');
+            window.hapticTap();
+            this.render();
         }
     }
 }
@@ -2182,166 +2518,255 @@ class GameStop {
 // ----------------------------------------------------
 // 13. SE VIRA (PAVIO CURTO & TENSÃO CRESCENTE)
 // ----------------------------------------------------
+// 13. SE VIRA (LEILÃO DE DESAFIO - 30 SEGUNDOS)
+// ----------------------------------------------------
 class GameSeVira {
     constructor(config, teams, ctx) {
         this.ctx = ctx;
         this.players = teams[0]?.players || window.GIW.store.players || [];
         this.alivePlayers = [...this.players];
-        this.eliminated = [];
+        this.challenger = this.players[0] || { id: 'p1', name: 'Jogador' };
+        this.targetGoal = 10;
+        this.itemsSpoken = 0;
+        this.timeLeft = 30.0;
+        this.phase = 'AUCTION'; // AUCTION -> RUNNING -> RESULT
         this.round = 1;
-        this.currIdx = 0;
-        this.baseTime = 12.0;
-        this.left = 12.0;
+
         this.categories = [
-            "Coisas Amarelas", "Motivos para Terminar um Namoro", "Coisas que se Encontra na Cozinha",
-            "Desculpas para Chegar Atrasado", "Coisas que se Faz no Banheiro", "Coisas Verdes",
-            "Mentiras Clássicas de Segunda-feira", "Coisas que Dão Medo no Escuro", "Piores Presentes de Amigo Secreto",
-            "Comidas Estranhas", "Coisas para Levar numa Ilha Deserta", "Profissões Perigosas",
-            "Coisas que Têm Cheiro Forte", "Animais que Voam ou Nadam", "Coisas Proibidas num Avião",
-            "Itens de uma Mochila de Viagem"
+            "Músicas que Todo Mundo Sabe Cantar",
+            "Marcas Famosas de Qualquer Coisa",
+            "Coisas Amarelas",
+            "Comidas que se Come com a Mão",
+            "Filmes Clássicos do Cinema",
+            "Coisas que se Encontra na Cozinha",
+            "Desculpas para Chegar Atrasado",
+            "Animais de 4 Patas",
+            "Coisas que Tem na Praia",
+            "Coisas que Dão Medo no Escuro",
+            "Profissões Conhecidas",
+            "Cidades ou Países do Mundo",
+            "Coisas que Quebram Fácil",
+            "Itens de uma Mochila de Viagem",
+            "Coisas que Custam Menos de R$ 10",
+            "Coisas que Tem em Todo Casamento",
+            "Desenhos Animados Famosos",
+            "Coisas que Tem em um Hospital",
+            "Séries Famosas de Streaming",
+            "Sobremesas ou Doces Gostosos"
         ];
         this.category = this.categories[Math.floor(Math.random() * this.categories.length)];
-        this.exploded = false;
-        this.isIntermission = false;
     }
 
     start() {
         appCore.nav('screen-game-board');
-        document.getElementById('gb-title').innerText = 'Se Vira (Pavio Curto)';
-        this.render();
+        document.getElementById('gb-title').innerText = 'Se Vira (Leilão 30s)';
+        this.renderAuction();
     }
 
-    render() {
-        if (this.isIntermission) return;
-        const p = this.alivePlayers[this.currIdx % (this.alivePlayers.length || 1)] || { name: 'Guerreiro', id: 'p_none' };
-        document.getElementById('gb-content').innerHTML = `
-            <div class="game-box-display" style="position:relative; overflow:hidden; width:100%; max-width:350px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                    <span style="font-size:0.8em; font-weight:900; color:var(--pop-yellow);">RODADA ${this.round}</span>
-                    <span style="font-size:0.78em; font-weight:800; color:var(--ink-muted);">Sobreviventes: ${this.alivePlayers.length}</span>
-                </div>
-                <p style="color:var(--pop-cyan); font-weight:900; font-size:1.1em; margin:2px 0 6px 0;">VEZ DE: <span style="color:var(--pop-yellow);">${p.name}</span></p>
-                <div style="position:relative; display:inline-block; margin:6px 0;">
-                    <div class="pulsing-bomb" id="sevira-bomb">💣</div>
-                    <div class="bomb-spark">✨</div>
-                </div>
-                <div style="font-size:1.35em; font-weight:900; color:var(--ink-white); margin:4px 0; line-height:1.2;">${this.category}</div>
-                <div id="sevira-num" class="timer-number" style="font-size:2.8em; color:var(--pop-magenta);">${this.left.toFixed(1)}s</div>
-            </div>
-            <button class="btn btn-success" style="max-width:320px; font-size:1.05em; padding:12px;" onclick="minigames.passSevira()">🔥 PASSEI A BOMBA! ➔</button>
-        `;
-    }
-
-    tick(delta) {
-        if (this.exploded || this.isIntermission) return;
-        this.left = Math.max(0, this.left - delta);
-        const el = document.getElementById('sevira-num');
-        if (el) el.innerText = `${this.left.toFixed(1)}s`;
-
-        const bomb = document.getElementById('sevira-bomb');
-        if (bomb && this.left < 3.5) {
-            bomb.style.filter = 'drop-shadow(0 0 25px #ff2a85)';
-        }
-
-        if (this.left <= 0) {
-            this.handleExplosion();
-        }
-    }
-
-    handleExplosion() {
-        this.exploded = true;
-        this.isIntermission = true;
-        window.playKaboom();
-        window.GIW.bus.emit('fx:juice', { type: 'flash', color: '#ff2a85' });
-        window.GIW.bus.emit('fx:screenshake', { intensity: 'heavy', durationMs: 700 });
-
-        window.showPlayerSelectorModal({
-            icon: '💥',
-            title: 'A Bomba Explodiu!',
-            subtitle: 'Quem estava segurando o celular no momento da explosão?',
-            players: this.alivePlayers,
-            cancelable: false,
-            onSelect: (victim) => {
-                this.alivePlayers = this.alivePlayers.filter(p => p.id !== victim.id);
-                this.eliminated.push(victim);
-
-                if (this.alivePlayers.length > 1) {
-                    this.showEliminationIntermission(victim);
-                } else {
-                    this.finishSurvivorMatch();
-                }
-            }
-        });
-    }
-
-    showEliminationIntermission(victim) {
-        window.playSound('badum');
-        this.round++;
-        // Tensão aumenta: o tempo base da próxima rodada fica 25% mais curto!
-        this.baseTime = Math.max(5.0, this.baseTime * 0.75);
-        const nextCategory = this.categories[Math.floor(Math.random() * this.categories.length)];
+    renderAuction() {
+        this.phase = 'AUCTION';
+        const playerChips = this.players.map(p => {
+            const isSelected = p.id === this.challenger.id;
+            return `
+                <button type="button" class="chip ${isSelected ? 'active' : ''}" 
+                        style="padding:6px 12px; font-weight:800; font-size:0.85em; border-radius:999px;"
+                        onclick="minigames.selectSeviraChallenger('${p.id}')">
+                    ${p.name}
+                </button>
+            `;
+        }).join('');
 
         document.getElementById('gb-content').innerHTML = `
             <div class="game-box-display" style="width:100%; max-width:350px;">
-                <div style="font-size:3em; margin-bottom:4px;">💥</div>
-                <h3 style="color:var(--pop-magenta); margin:0 0 4px 0;">EXPLODIU EM ${victim.name.toUpperCase()}!</h3>
-                <p style="color:var(--ink-muted); font-size:0.82em; font-weight:800; margin-bottom:12px;">
-                    Eliminado da rodada! Restam <b>${this.alivePlayers.length} sobreviventes</b>.
+                <span style="font-size:0.85em; font-weight:900; color:var(--pop-cyan); text-transform:uppercase; letter-spacing:1.5px;">LEILÃO DE CORAGEM (30s)</span>
+                <h2 style="font-size:1.7em; font-weight:900; color:var(--pop-yellow); margin:8px 0 6px 0; line-height:1.2; text-transform:uppercase;">${this.category}</h2>
+                <p style="color:var(--ink-muted); font-size:0.82em; font-weight:800; margin-bottom:14px;">
+                    Façam seus lances na mesa! Quem promete falar mais itens em 30 segundos?
                 </p>
-                <div style="background:rgba(255,0,85,0.08); border:1.5px dashed var(--pop-magenta); border-radius:12px; padding:10px; margin-bottom:6px;">
-                    <span style="font-size:0.75em; color:var(--pop-magenta); font-weight:900;">TENSÃO MÁXIMA NA RODADA ${this.round}!</span>
-                    <div style="font-size:1.1em; font-weight:900; color:#fff; margin-top:2px;">Novo Tema: "${nextCategory}"</div>
-                    <div style="font-size:0.8em; font-weight:800; color:var(--pop-yellow); margin-top:2px;">Pavio encurtou para apenas ${this.baseTime.toFixed(1)}s!</div>
+
+                <!-- Quem deu o maior lance -->
+                <div style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1); border-radius:14px; padding:10px; margin-bottom:10px;">
+                    <div style="font-size:0.75em; font-weight:900; color:var(--pop-cyan); text-transform:uppercase; margin-bottom:8px;">QUEM VAI CUMPRIR O DESAFIO?</div>
+                    <div style="display:flex; gap:6px; flex-wrap:wrap; justify-content:center;">
+                        ${playerChips}
+                    </div>
+                </div>
+
+                <!-- Meta de Itens -->
+                <div style="background:rgba(255,214,0,0.07); border:1.5px solid rgba(255,214,0,0.35); border-radius:14px; padding:12px;">
+                    <div style="font-size:0.75em; font-weight:900; color:var(--pop-yellow); text-transform:uppercase; margin-bottom:4px;">PROMETEU FALAR:</div>
+                    <div style="display:flex; align-items:center; justify-content:center; gap:16px;">
+                        <button class="btn btn-dark" style="width:44px; height:44px; font-size:1.4em; padding:0; display:flex; align-items:center; justify-content:center;" onclick="minigames.adjustSeviraGoal(-1)">-</button>
+                        <span id="sevira-goal-num" style="font-size:2.5em; font-weight:900; color:#fff; min-width:60px;">${this.targetGoal}</span>
+                        <button class="btn btn-dark" style="width:44px; height:44px; font-size:1.4em; padding:0; display:flex; align-items:center; justify-content:center;" onclick="minigames.adjustSeviraGoal(1)">+</button>
+                    </div>
+                    <div style="font-size:0.78em; color:var(--ink-muted); font-weight:800; margin-top:2px;">itens em 30 segundos</div>
                 </div>
             </div>
-            <button class="btn btn-warning" style="max-width:320px;" onclick="minigames.continueSeviraRound('${nextCategory}')">
-                CONTINUAR SE VIRA 💣
+
+            <button class="btn btn-warning" style="max-width:320px; padding:15px; font-weight:900; font-size:1.05em; margin-top:12px;" onclick="minigames.startSeviraRun()">
+                ⏱️ VALENDO! COMEÇAR 30s
             </button>
         `;
     }
 
-    continueRound(nextCategory) {
-        this.category = nextCategory;
-        this.left = this.baseTime;
-        this.currIdx = 0;
-        this.exploded = false;
-        this.isIntermission = false;
-        window.playSound('nav');
+    startRun() {
+        this.phase = 'RUNNING';
+        this.itemsSpoken = 0;
+        this.timeLeft = 30.0;
+        window.playSound('whistle');
         window.hapticTap();
-        this.render();
+        this.renderRunning();
     }
 
-    finishSurvivorMatch() {
-        const champion = this.alivePlayers[0] || this.players[0];
+    renderRunning() {
+        document.getElementById('gb-content').innerHTML = `
+            <div class="game-box-display" style="width:100%; max-width:350px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                    <span style="font-size:0.85em; font-weight:900; color:var(--pop-cyan); text-transform:uppercase;">DESAFIANTE: ${this.challenger.name}</span>
+                    <span id="sevira-timer-text" class="timer-number" style="font-size:1.8em; color:var(--pop-magenta);">${Math.ceil(this.timeLeft)}s</span>
+                </div>
+                
+                <h3 style="color:var(--pop-yellow); font-size:1.3em; font-weight:900; margin:4px 0 8px 0; text-transform:uppercase;">${this.category}</h3>
+
+                <div style="background:rgba(0,0,0,0.3); border:2px solid var(--pop-yellow); border-radius:18px; padding:14px; margin:8px 0;">
+                    <div style="font-size:0.8em; font-weight:900; color:var(--pop-yellow); text-transform:uppercase;">ITENS FALADOS NA MESA:</div>
+                    <div id="sevira-counter" style="font-size:3.5em; font-weight:900; color:#fff; line-height:1; margin:8px 0;">
+                        ${this.itemsSpoken} / ${this.targetGoal}
+                    </div>
+                    <div style="font-size:0.75em; color:var(--ink-muted); font-weight:800;">
+                        Toque no botão a cada item válido que ${this.challenger.name} falar!
+                    </div>
+                </div>
+            </div>
+
+            <div style="width:100%; max-width:330px; display:flex; flex-direction:column; gap:10px; margin-top:10px;">
+                <button class="btn btn-success" style="padding:16px; font-size:1.15em; font-weight:900;" onclick="minigames.hitSeviraItem()">
+                    🎯 +1 ITEM FALADO!
+                </button>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn btn-warning" style="flex:1; padding:10px; font-size:0.85em; font-weight:900; color:#000;" onclick="minigames.finishSeviraSuccess()">
+                        BATEU A META! ✅
+                    </button>
+                    <button class="btn btn-danger" style="flex:1; padding:10px; font-size:0.85em; font-weight:900;" onclick="minigames.finishSeviraFail()">
+                        FALHOU / DESISTIU 💥
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+
+    tick(delta) {
+        if (this.phase !== 'RUNNING') return;
+        this.timeLeft = Math.max(0, this.timeLeft - delta);
+        const timerEl = document.getElementById('sevira-timer-text');
+        if (timerEl) {
+            timerEl.innerText = `${Math.ceil(this.timeLeft)}s`;
+            if (this.timeLeft <= 5.0) {
+                timerEl.style.color = 'var(--pop-magenta)';
+                timerEl.style.transform = 'scale(1.15)';
+            }
+        }
+
+        if (this.timeLeft <= 0) {
+            if (this.itemsSpoken >= this.targetGoal) {
+                this.finishSuccess();
+            } else {
+                this.finishFail();
+            }
+        }
+    }
+
+    hitItem() {
+        if (this.phase !== 'RUNNING') return;
+        this.itemsSpoken++;
+        window.playSound('pop');
+        window.hapticTap();
+        const counterEl = document.getElementById('sevira-counter');
+        if (counterEl) {
+            counterEl.innerText = `${this.itemsSpoken} / ${this.targetGoal}`;
+            if (typeof window.gsap !== 'undefined') {
+                window.gsap.fromTo(counterEl, { scale: 1.2 }, { scale: 1, duration: 0.2 });
+            }
+        }
+
+        if (this.itemsSpoken >= this.targetGoal) {
+            this.finishSuccess();
+        }
+    }
+
+    finishSuccess() {
+        if (this.phase === 'RESULT') return;
+        this.phase = 'RESULT';
         window.playSound('victory');
-        window.GIW.bus.emit('fx:juice', { type: 'confetti', particleCount: 120 });
+        window.GIW.bus.emit('fx:juice', { type: 'confetti', particleCount: 100 });
 
         const mutations = [
-            { playerId: champion.id, baseDelta: 25 },
-            ...this.eliminated.map(p => ({ playerId: p.id, baseDelta: 0, falhasDelta: 1 }))
+            { playerId: this.challenger.id, baseDelta: 20 }
         ];
 
         this.ctx.complete({
-            title: `${champion.name} Sobreviveu à Bomba! 👑`,
+            title: `${this.challenger.name} se Virou nos 30! 🎉`,
             titleColor: 'var(--pop-green)',
-            detailHTML: `<p style="font-weight:900; font-size:1.15em;">Sobrevivente supremo do Se Vira!<br><b style="color:var(--pop-green);">+25 Pts para o Campeão!</b></p>`,
+            detailHTML: `
+                <p style="font-weight:900; font-size:1.2em; color:var(--pop-yellow);">
+                    Prometeu ${this.targetGoal} itens e entregou ${this.itemsSpoken} no tema "${this.category}"!
+                </p>
+                <b style="color:var(--pop-green); font-size:1.1em;">+20 Pontos de Coragem!</b>
+            `,
             scoreMutations: mutations,
-            losers: this.eliminated.map(p => p.id),
             celebrateWithConfetti: true
         });
     }
 
+    finishFail() {
+        if (this.phase === 'RESULT') return;
+        this.phase = 'RESULT';
+        window.playKaboom();
+        window.vibrar(600);
+        window.GIW.bus.emit('fx:juice', { type: 'flash', color: '#ff2a85' });
+
+        const mutations = [
+            { playerId: this.challenger.id, baseDelta: 0, falhasDelta: 1, statPrendDelta: 1 }
+        ];
+
+        this.ctx.complete({
+            title: `${this.challenger.name} Não Aguentou a Pressão! 💥`,
+            titleColor: 'var(--pop-magenta)',
+            detailHTML: `
+                <p style="font-weight:900; font-size:1.15em;">
+                    Prometeu ${this.targetGoal} itens mas só conseguiu falar ${this.itemsSpoken} no tempo!
+                </p>
+                <b style="color:var(--pop-magenta);">Castigo da Mesa / Prenda ativada!</b>
+            `,
+            scoreMutations: mutations,
+            losers: [this.challenger.id]
+        });
+    }
+
     handleAction(type, payload) {
-        if (this.exploded || this.isIntermission) return;
-        if (type === 'PASS_SEVIRA') {
-            this.currIdx++;
-            this.left = Math.max(3.5, this.left * 0.94);
+        if (type === 'SELECT_SEVIRA_CHALLENGER') {
+            const p = this.players.find(x => x.id === payload);
+            if (p) {
+                this.challenger = p;
+                window.playSound('pop');
+                window.hapticTap();
+                this.renderAuction();
+            }
+        } else if (type === 'ADJUST_SEVIRA_GOAL') {
+            this.targetGoal = Math.max(3, Math.min(40, this.targetGoal + payload));
+            window.playSound('tick');
             window.hapticTap();
-            window.playSound('typewriter');
-            window.playSound('beep');
-            this.render();
-        } else if (type === 'CONTINUE_SEVIRA') {
-            this.continueRound(payload);
+            const numEl = document.getElementById('sevira-goal-num');
+            if (numEl) numEl.innerText = this.targetGoal;
+        } else if (type === 'START_SEVIRA_RUN') {
+            this.startRun();
+        } else if (type === 'HIT_SEVIRA_ITEM') {
+            this.hitItem();
+        } else if (type === 'FINISH_SEVIRA_SUCCESS') {
+            this.finishSuccess();
+        } else if (type === 'FINISH_SEVIRA_FAIL') {
+            this.finishFail();
         }
     }
 }
@@ -2353,10 +2778,13 @@ class GameCinco {
     constructor(config, teams, ctx) {
         this.ctx = ctx;
         this.players = teams[0]?.players || window.GIW.store.players || [];
-        this.curr = this.players[0] || { id: 'p_none', name: 'Guerreiro' };
+        this.alivePlayers = shuffle([...this.players]);
+        this.currentIdx = 0;
+        this.eliminated = [];
         this.left = 5.0;
         this.running = false;
         this.ended = false;
+
         const challenges = [
             "3 marcas de cerveja",
             "3 filmes de terror",
@@ -2377,66 +2805,266 @@ class GameCinco {
             "3 coisas que você sempre esquece em casa",
             "3 heróis dos Vingadores ou Liga da Justiça",
             "3 apelidos carinhosos cafonas",
-            "3 comidas que não combinam com feijão"
+            "3 comidas que não combinam com feijão",
+            "3 coisas para fazer num domingo chuvoso",
+            "3 séries que você assistiu mais de uma vez",
+            "3 coisas que deixam qualquer um irritado no trânsito",
+            "3 sobremesas com chocolate",
+            "3 nomes de praia que você já foi ou quer ir",
+            "3 personagens do Chaves",
+            "3 coisas que você compra no boteco",
+            "3 lugares péssimos para ser pedido em casamento",
+            "3 animais que você teria medo de encontrar na floresta",
+            "3 marcas de tênis ou roupa esportiva",
+            "3 coisas que todo mundo já pesquisou de madrugada",
+            "3 ingredientes para fazer um hambúrguer perfeito",
+            "3 profissões que exigem coragem absurda",
+            "3 piadas ruins de tio do pavê",
+            "3 jogos clássicos de celular",
+            "3 coisas que não podem faltar no churrasco",
+            "3 canções que todo mundo sabe o refrão",
+            "3 motivos para fugir de uma festa chata",
+            "3 coisas que você faria se ganhasse na loteria hoje",
+            "3 superstições populares brasileiras"
         ];
-        this.prompt = challenges[Math.floor(Math.random() * challenges.length)];
+        this.challenges = shuffle(challenges);
+        this.challengeIdx = 0;
     }
 
     start() {
         appCore.nav('screen-game-board');
-        document.getElementById('gb-title').innerText = '5 Segundos';
+        document.getElementById('gb-title').innerText = '5 Segundos (Sobrevivência)';
+        this.renderTurn();
+    }
+
+    renderTurn() {
+        if (this.alivePlayers.length <= 1 && this.players.length > 1) {
+            this.finishSurvival();
+            return;
+        }
+
+        const curr = this.alivePlayers[this.currentIdx % this.alivePlayers.length] || { id: 'p_none', name: 'Jogador' };
+        this.prompt = this.challenges[this.challengeIdx % this.challenges.length];
+        this.state = 'HIDDEN'; // HIDDEN -> PREPARING -> RUNNING -> REVIEW
+        this.left = 5.0;
+        this.running = false;
+        clearInterval(this.prepTimer);
+
         document.getElementById('gb-content').innerHTML = `
-            <div class="game-box-display">
-                <p style="color:var(--pop-cyan); font-weight:900;">VEZ DE: ${this.curr.name}</p>
-                <div style="font-size:2em; font-weight:900; color:var(--pop-yellow); margin:12px 0;">Diga ${this.prompt}!</div>
-                <div id="cinco-num" class="timer-number" style="font-size:3.5em;">5.0s</div>
+            <div class="game-box-display" style="width:100%; max-width:350px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                    <span style="color:var(--pop-cyan); font-weight:900; font-size:0.9em; text-transform:uppercase;">VEZ DE: ${curr.name}</span>
+                    <span style="color:var(--pop-yellow); font-size:0.8em; font-weight:800;">${this.alivePlayers.length} Sobreviventes</span>
+                </div>
+
+                <div style="background:rgba(255,255,255,0.05); border:1.5px dashed rgba(255,255,255,0.2); border-radius:16px; padding:24px 16px; margin:12px 0;">
+                    <span style="font-size:2.4em;">🔒</span>
+                    <div style="font-size:1.15em; font-weight:900; color:var(--ink-muted); margin-top:8px;">
+                        Objetivo Oculto
+                    </div>
+                    <div style="font-size:0.75em; color:var(--ink-muted); margin-top:4px;">
+                        Toque no botão abaixo quando ${curr.name} estiver pronto!
+                    </div>
+                </div>
+
+                <div id="cinco-num" class="timer-number" style="font-size:2.8em; color:var(--ink-muted); opacity:0.6;">5.0s</div>
             </div>
-            <button class="btn btn-warning" id="btn-start-cinco" style="max-width:320px;" onclick="minigames.startCinco()">⏱️ DISPARAR 5s!</button>
+
+            <div id="cinco-ctrls" style="width:100%; max-width:330px; margin-top:10px;">
+                <button class="btn btn-warning" style="width:100%; font-size:1.1em; padding:16px; font-weight:900;" onclick="minigames.revealCincoObjective()">
+                    👁️ REVELAR DESAFIO (3s PENSAR)
+                </button>
+            </div>
+        `;
+    }
+
+    revealObjective() {
+        if (this.state !== 'HIDDEN') return;
+        this.state = 'PREPARING';
+        this.prepCount = 3;
+        window.playSound('pop');
+        window.hapticTap();
+
+        const curr = this.alivePlayers[this.currentIdx % this.alivePlayers.length] || { id: 'p_none', name: 'Jogador' };
+
+        const updatePrepUI = () => {
+            document.getElementById('gb-content').innerHTML = `
+                <div class="game-box-display" style="width:100%; max-width:350px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <span style="color:var(--pop-cyan); font-weight:900; font-size:0.9em; text-transform:uppercase;">VEZ DE: ${curr.name}</span>
+                        <span style="color:var(--pop-yellow); font-size:0.8em; font-weight:800;">${this.alivePlayers.length} Vivos</span>
+                    </div>
+
+                    <div style="background:rgba(0,229,255,0.08); border:2px solid var(--pop-cyan); border-radius:16px; padding:16px 12px; margin:10px 0;">
+                        <span style="font-size:0.75em; font-weight:900; color:var(--pop-yellow); text-transform:uppercase; letter-spacing:1px;">SEU DESAFIO:</span>
+                        <div style="font-size:1.9em; font-weight:900; color:#fff; margin:6px 0; line-height:1.15; text-shadow:0 2px 8px rgba(0,0,0,0.6);">
+                            Diga ${this.prompt}!
+                        </div>
+                    </div>
+
+                    <div style="margin:14px 0;">
+                        <div style="font-size:0.8em; font-weight:900; color:var(--pop-yellow); text-transform:uppercase; letter-spacing:1px;">PENSE RÁPIDO...</div>
+                        <div id="cinco-prep-num" style="font-size:4em; font-weight:900; color:var(--pop-yellow); line-height:1; margin-top:4px;">
+                            ${this.prepCount}
+                        </div>
+                    </div>
+                </div>
+
+                <div id="cinco-ctrls" style="width:100%; max-width:330px; margin-top:8px;">
+                    <button class="btn btn-dark" style="width:100%; font-size:0.85em; padding:12px; opacity:0.7;" disabled>
+                        Iniciando 5 segundos automaticamente...
+                    </button>
+                </div>
+            `;
+            if (typeof window.gsap !== 'undefined') {
+                window.gsap.fromTo('#cinco-prep-num', { scale: 1.4 }, { scale: 1, duration: 0.3 });
+            }
+        };
+
+        updatePrepUI();
+        window.playSound('beep');
+
+        this.prepTimer = setInterval(() => {
+            this.prepCount--;
+            if (this.prepCount > 0) {
+                window.playSound('beep');
+                updatePrepUI();
+            } else {
+                clearInterval(this.prepTimer);
+                this.startTimerAuto();
+            }
+        }, 1000);
+    }
+
+    startTimerAuto() {
+        this.state = 'RUNNING';
+        this.running = true;
+        this.left = 5.0;
+        window.playSound('whistle');
+        window.hapticTap();
+        const curr = this.alivePlayers[this.currentIdx % this.alivePlayers.length] || { id: 'p_none', name: 'Jogador' };
+
+        document.getElementById('gb-content').innerHTML = `
+            <div class="game-box-display" style="width:100%; max-width:350px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <span style="color:var(--pop-cyan); font-weight:900; font-size:0.9em; text-transform:uppercase;">VEZ DE: ${curr.name}</span>
+                    <span style="color:var(--pop-yellow); font-size:0.8em; font-weight:800;">${this.alivePlayers.length} Vivos</span>
+                </div>
+
+                <div style="background:rgba(255,42,133,0.1); border:2px solid var(--pop-magenta); border-radius:16px; padding:14px 10px; margin:8px 0;">
+                    <div style="font-size:1.8em; font-weight:900; color:#fff; line-height:1.15;">
+                        Diga ${this.prompt}!
+                    </div>
+                </div>
+
+                <div id="cinco-num" class="timer-number" style="font-size:4em; color:var(--pop-magenta); margin:8px 0;">5.0s</div>
+                <div style="font-size:0.75em; color:var(--ink-muted); font-weight:800;">Responda na roda antes do tempo zerar!</div>
+            </div>
+
+            <div id="cinco-ctrls" style="width:100%; max-width:330px; display:flex; gap:10px; margin-top:12px;">
+                <button class="btn btn-danger" style="flex:1; font-size:0.95em; padding:14px 6px; font-weight:900;" onclick="minigames.finishCinco(false)">
+                    💥 FALHOU
+                </button>
+                <button class="btn btn-success" style="flex:1; font-size:0.95em; padding:14px 6px; font-weight:900;" onclick="minigames.finishCinco(true)">
+                    ✅ CONSEGUIU!
+                </button>
+            </div>
         `;
     }
 
     tick(delta) {
-        if (this.running && !this.ended) {
+        if (this.running && !this.ended && this.state === 'RUNNING') {
             this.left = Math.max(0, this.left - delta);
             const el = document.getElementById('cinco-num');
             if (el) el.innerText = `${this.left.toFixed(1)}s`;
             if (this.left <= 0) {
                 this.running = false;
+                this.state = 'REVIEW';
                 window.playKaboom();
-                window.vibrar(400);
-                document.getElementById('gb-content').innerHTML += `
-                    <div style="display:flex; gap:10px; max-width:320px; width:100%; margin-top:12px;">
-                        <button class="btn btn-danger" onclick="minigames.finishCinco(false)">FALHOU ❌</button>
-                        <button class="btn btn-success" onclick="minigames.finishCinco(true)">CONSEGUIU! ✅</button>
-                    </div>
-                `;
+                window.vibrar(500);
             }
         }
     }
 
+    finishSurvival() {
+        this.ended = true;
+        const champion = this.alivePlayers[0] || this.players[0] || { id: 'p_none', name: 'Campeão' };
+        window.playSound('victory');
+        window.GIW.bus.emit('fx:juice', { type: 'confetti', particleCount: 120 });
+
+        const mutations = [
+            { playerId: champion.id, baseDelta: 20 },
+            ...this.eliminated.map(p => ({ playerId: p.id, falhasDelta: 1 }))
+        ];
+
+        this.ctx.complete({
+            title: `${champion.name.toUpperCase()} SOBREVIVEU! 🏆`,
+            titleColor: 'var(--pop-green)',
+            detailHTML: `
+                <p style="font-weight:900; font-size:1.15em;">
+                    O único sobrevivente dos 5 Segundos!<br>
+                    <b style="color:var(--pop-green);">+20 Pts para ${champion.name}!</b>
+                </p>
+                <p style="font-size:0.8em; color:var(--ink-muted); margin-top:6px;">
+                    Eliminados: ${this.eliminated.map(p => p.name).join(', ') || 'Ninguém'}.
+                </p>
+            `,
+            scoreMutations: mutations,
+            losers: this.eliminated.map(p => p.id),
+            celebrateWithConfetti: true
+        });
+    }
+
     handleAction(type, payload) {
-        if (type === 'START_CINCO') {
-            this.running = true;
-            const btn = document.getElementById('btn-start-cinco');
-            if (btn) btn.style.display = 'none';
-            window.playBeep(true);
+        if (type === 'REVEAL_CINCO') {
+            this.revealObjective();
+        } else if (type === 'START_CINCO') {
+            this.startTimerAuto();
         } else if (type === 'FINISH_CINCO') {
-            if (this.ended) return;
-            this.ended = true;
-            this.ctx.complete({
-                title: payload ? 'Mandou Bem!' : 'Travou nos 5s!',
-                titleColor: payload ? 'var(--pop-green)' : 'var(--pop-magenta)',
-                detailHTML: `<p style="font-weight:900; font-size:1.2em;">${this.curr.name} ${payload ? 'garantiu +10 Pts' : 'levou 1 Falha'}!</p>`,
-                scoreMutations: [{ playerId: this.curr.id, baseDelta: payload ? 10 : 0, falhasDelta: payload ? 0 : 1 }],
-                losers: payload ? [] : [this.curr.id],
-                celebrateWithConfetti: !!payload
-            });
+            this.running = false;
+            if (payload) {
+                // Conseguiu!
+                window.playSound('success');
+                window.hapticTap();
+                this.currentIdx = (this.currentIdx + 1) % this.alivePlayers.length;
+                this.challengeIdx++;
+                this.renderTurn();
+            } else {
+                // Falhou: Eliminado!
+                const victim = this.alivePlayers[this.currentIdx % this.alivePlayers.length];
+                this.eliminated.push(victim);
+                this.alivePlayers.splice(this.currentIdx % this.alivePlayers.length, 1);
+                window.playKaboom();
+                window.GIW.bus.emit('fx:screenshake', { intensity: 'light', durationMs: 250 });
+
+                if (this.alivePlayers.length <= 1 && this.players.length > 1) {
+                    this.finishSurvival();
+                } else if (this.alivePlayers.length === 0) {
+                    this.finishSurvival();
+                } else {
+                    document.getElementById('gb-content').innerHTML = `
+                        <div class="game-box-display">
+                            <span style="font-size:2.8em;">💥</span>
+                            <div style="font-size:1.4em; font-weight:900; color:var(--pop-magenta); margin:10px 0;">
+                                ${victim.name.toUpperCase()} FOI ELIMINADO!
+                            </div>
+                            <p style="font-size:0.85em; color:var(--ink-muted); font-weight:800;">
+                                Restam ${this.alivePlayers.length} jogador(es) na disputa.
+                            </p>
+                        </div>
+                    `;
+                    setTimeout(() => {
+                        this.challengeIdx++;
+                        this.renderTurn();
+                    }, 1400);
+                }
+            }
         }
     }
 }
 
 // ----------------------------------------------------
-// 15. BATATA QUENTE (ACELERÔMETRO & SOBREVIVÊNCIA)
+// 15. BATATA QUENTE (TEMA NA RODA & EXPLOSÃO NA MÃO)
 // ----------------------------------------------------
 class GameBatata {
     constructor(config, teams, ctx) {
@@ -2446,69 +3074,93 @@ class GameBatata {
         this.eliminated = [];
         this.currIdx = 0;
         this.round = 1;
-        this.minTime = 10;
-        this.maxTime = 20;
+        this.minTime = 12;
+        this.maxTime = 24;
         this.explosionTime = this.minTime + Math.random() * (this.maxTime - this.minTime);
         this.elapsed = 0;
         this.exploded = false;
         this.intermission = false;
+
+        this.themes = [
+            "Coisas que Tem na Geladeira",
+            "Marcas Famosas de Carro",
+            "Sobremesas ou Doces",
+            "Coisas que se Leva para a Praia",
+            "Animais que Voam",
+            "Coisas Amarelas",
+            "Filmes Clássicos de Terror ou Ação",
+            "Coisas que se Encontra no Banheiro",
+            "Itens de uma Mochila de Viagem",
+            "Comidas de Festa Junina ou Churrasco",
+            "Coisas que Quebram Fácil",
+            "Profissões Conhecidas",
+            "Palavras que Começam com a Letra 'S'",
+            "Coisas que Fazem Muito Barulho",
+            "Vilões de Filmes ou Desenhos",
+            "Lugares Onde Ninguém Quer Ir",
+            "Coisas que Custam Menos de R$ 5"
+        ];
+        this.theme = this.themes[Math.floor(Math.random() * this.themes.length)];
     }
 
     async start() {
         appCore.nav('screen-game-board');
         document.getElementById('gb-title').innerText = 'Batata Quente';
-        this.armSensor();
         this.render();
-    }
-
-    async armSensor() {
-        if (!this.ctx.sandbox.bindDeviceMotion) return;
-        const threshold = Math.max(14, 25 - (this.round * 2)); // Fica mais sensível a cada rodada
-        await this.ctx.sandbox.bindDeviceMotion(() => {
-            this.explode('Movimento brusco detectado pelo sensor!');
-        }, threshold);
     }
 
     render() {
         if (this.intermission) return;
-        const currentHolder = this.alivePlayers[this.currIdx % (this.alivePlayers.length || 1)] || { name: 'Guerreiro', id: 'p_none' };
         
         const aliveBadges = this.alivePlayers.map(p => 
-            `<span style="display:inline-block; padding:3px 8px; border-radius:12px; background:rgba(255,255,255,0.08); font-size:0.75em; font-weight:800; border:1px solid rgba(255,255,255,0.15);">${p.name}</span>`
+            `<span style="display:inline-block; padding:4px 10px; border-radius:12px; background:rgba(255,255,255,0.08); font-size:0.8em; font-weight:800; border:1px solid rgba(255,255,255,0.15); color:#fff;">${p.name}</span>`
         ).join(' ');
 
         document.getElementById('gb-content').innerHTML = `
-            <div class="game-box-display" style="position:relative; overflow:hidden;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <div class="game-box-display" style="position:relative; overflow:hidden; width:100%; max-width:350px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                     <span style="font-size:0.8em; font-weight:900; color:var(--pop-yellow); text-transform:uppercase; letter-spacing:1px;">Rodada ${this.round}</span>
                     <span style="font-size:0.8em; font-weight:900; color:var(--pop-magenta);">${this.alivePlayers.length} Vivos</span>
                 </div>
-                <p style="color:var(--pop-magenta); font-weight:900; font-size:1.2em; margin:6px 0;">BATATA COM: <span style="color:var(--pop-yellow);">${currentHolder.name}</span></p>
-                
-                <div style="position:relative; display:inline-block; margin:14px 0;">
-                    <div class="pulsing-bomb" id="batata-bomb">💣</div>
-                    <div class="bomb-spark">🔥</div>
+
+                <div style="background:rgba(255,214,0,0.08); border:2px solid var(--pop-yellow); border-radius:16px; padding:12px; margin:8px 0;">
+                    <span style="font-size:0.75em; font-weight:900; color:var(--pop-yellow); text-transform:uppercase; letter-spacing:1px;">TEMA DA RODADA:</span>
+                    <div style="font-size:1.55em; font-weight:900; color:#fff; margin-top:4px; line-height:1.2; text-transform:uppercase;">
+                        ${this.theme}
+                    </div>
                 </div>
                 
-                <p style="color:var(--ink-muted); font-size:0.85em; font-weight:800;">Passe com muito cuidado! Cuidado com trepidação e o tempo secreto!</p>
+                <div style="position:relative; display:inline-block; margin:10px 0;">
+                    <div class="pulsing-bomb" id="batata-bomb" style="font-size:3.8em;">💣</div>
+                    <div class="bomb-spark" style="font-size:1.8em;">🔥</div>
+                </div>
                 
-                <div style="margin-top:10px; display:flex; gap:4px; flex-wrap:wrap; justify-content:center;">
+                <p style="color:var(--ink-muted); font-size:0.85em; font-weight:800; margin:4px 0 10px 0; line-height:1.3;">
+                    Fale um item do tema e <b>passe o celular imediatamente</b>!<br>Quando a bomba explodir, quem estiver com ele na mão é eliminado!
+                </p>
+                
+                <div style="display:flex; gap:6px; flex-wrap:wrap; justify-content:center;">
                     ${aliveBadges}
                 </div>
             </div>
-            <button class="btn btn-warning" style="max-width:320px;" onclick="minigames.passBatata()">PASSEI A BOMBA ➔</button>
+
+            <div style="width:100%; max-width:330px; margin-top:12px;">
+                <button class="btn btn-danger" style="width:100%; padding:14px; font-weight:900; font-size:0.95em;" onclick="minigames.explodeBatataNow()">
+                    💥 EXPLODIR AGORA (MANUAL)
+                </button>
+            </div>
         `;
 
         if (typeof window.gsap !== 'undefined') {
-            const pulseSpeed = Math.max(0.18, 0.45 - (this.round * 0.06));
+            const pulseSpeed = Math.max(0.16, 0.45 - (this.round * 0.05));
             window.gsap.fromTo('#batata-bomb', 
-                { scale: 0.88 }, 
-                { scale: 1.18, duration: pulseSpeed, repeat: -1, yoyo: true, ease: 'power1.inOut' }
+                { scale: 0.9 }, 
+                { scale: 1.2, duration: pulseSpeed, repeat: -1, yoyo: true, ease: 'power1.inOut' }
             );
         }
     }
 
-    tick(delta, elapsed) {
+    tick(delta) {
         if (this.exploded || this.intermission) return;
         this.elapsed += delta;
         if (this.elapsed >= this.explosionTime) {
@@ -2516,7 +3168,7 @@ class GameBatata {
         }
     }
 
-    explode(reason) {
+    explode(reason = 'A batata quente explodiu na mão!') {
         if (this.exploded) return;
         this.exploded = true;
         this.ctx.sandbox.clearDeviceMotion?.();
@@ -2525,24 +3177,16 @@ class GameBatata {
         window.GIW.bus.emit('fx:screenshake', { intensity: 'heavy', durationMs: 800 });
         window.vibrar(800);
 
-        const currentHolder = this.alivePlayers[this.currIdx % (this.alivePlayers.length || 1)] || this.alivePlayers[0];
-
-        // Se temos mais de 2 jogadores, permite confirmar/selecionar quem realmente estava com o celular na mão
-        if (this.alivePlayers.length > 2) {
-            window.showPlayerSelectorModal({
-                icon: '💣',
-                title: 'A BATATA EXPLODIU!',
-                subtitle: `${reason}<br>Quem estava com o celular na mão quando estourou?`,
-                players: this.alivePlayers,
-                cancelable: false,
-                onSelect: (chosen) => {
-                    this.handleElimination(chosen, reason);
-                }
-            });
-        } else {
-            // Em final mano a mano, explode no atual direto
-            this.handleElimination(currentHolder, reason);
-        }
+        window.showPlayerSelectorModal({
+            icon: '💣',
+            title: 'A BATATA EXPLODIU!',
+            subtitle: 'Com quem o celular estava na mão no momento do estrondo?',
+            players: this.alivePlayers,
+            cancelable: false,
+            onSelect: (chosen) => {
+                this.handleElimination(chosen, reason);
+            }
+        });
     }
 
     handleElimination(victim, reason) {
@@ -2550,7 +3194,7 @@ class GameBatata {
         this.alivePlayers = this.alivePlayers.filter(p => p.id !== victim.id);
 
         if (this.alivePlayers.length <= 1) {
-            const champion = this.alivePlayers[0] || { name: 'Guerreiro', id: 'p_none' };
+            const champion = this.alivePlayers[0] || { name: 'Jogador', id: 'p_none' };
             const mutations = [
                 { playerId: champion.id, baseDelta: 25 },
                 ...this.eliminated.map(p => ({ playerId: p.id, baseDelta: 0, falhasDelta: 1, statPrendDelta: 1 }))
@@ -2606,30 +3250,19 @@ class GameBatata {
 
     continueNextRound() {
         this.round++;
-        this.minTime = Math.max(5, Math.round(this.minTime * 0.75));
-        this.maxTime = Math.max(9, Math.round(this.maxTime * 0.75));
+        this.theme = this.themes[Math.floor(Math.random() * this.themes.length)];
+        this.minTime = Math.max(8, Math.round(this.minTime * 0.8));
+        this.maxTime = Math.max(14, Math.round(this.maxTime * 0.8));
         this.explosionTime = this.minTime + Math.random() * (this.maxTime - this.minTime);
         this.elapsed = 0;
         this.exploded = false;
         this.intermission = false;
-        this.currIdx = 0;
-        this.armSensor();
         this.render();
     }
 
     handleAction(type) {
-        if (type === 'PASS_BATATA') {
-            if (this.exploded || this.intermission) return;
-            this.currIdx++;
-            window.hapticTap();
-            window.playSound('typewriter');
-            this.render();
-            if (typeof window.gsap !== 'undefined') {
-                window.gsap.fromTo('#batata-bomb', 
-                    { x: -80, opacity: 0, rotation: -20 }, 
-                    { x: 0, opacity: 1, rotation: 0, duration: 0.28, ease: 'back.out(2)' }
-                );
-            }
+        if (type === 'EXPLODE_BATATA_NOW') {
+            this.explode('Bomba detonada!');
         } else if (type === 'CONTINUE_BATATA') {
             this.continueNextRound();
         }
@@ -2663,7 +3296,24 @@ class GameUltimo {
             "TIMES DE FUTEBOL DO MUNDO",
             "COISAS AMARELAS",
             "BEBIDAS NÃO ALCOÓLICAS",
-            "MEIOS DE TRANSPORTE"
+            "MEIOS DE TRANSPORTE",
+            "COMIDAS TÍPICAS BRASILEIRAS",
+            "INSTRUMENTOS MUSICAIS",
+            "OBJETOS QUE TEM NA COZINHA",
+            "PALAVRAS EM INGLÊS QUE USAMOS NO DIA A DIA",
+            "PROFISSÕES COM A LETRA 'P'",
+            "COISAS QUE ENCONTRAMOS NA PRAIA",
+            "COISAS QUE CABEM NO BOLSO",
+            "FILMES QUE GANHARAM O OSCAR",
+            "PERSONAGENS DA DISNEY OU PIXAR",
+            "MOTIVOS PARA LEVAR UMA MULTA",
+            "COISAS QUE DAMOS DE PRESENTE DE NATAL",
+            "CIDADES TURÍSTICAS DO BRASIL",
+            "COISAS QUE FAZEM MUITO BARULHO",
+            "ANIMAIS QUE VIVEM NO MAR",
+            "DOCES E SOBREMESAS",
+            "COISAS QUE SE FAZ NO DOMINGO À TARDE",
+            "MARCAS DE CELULAR E ELETRÔNICOS"
         ];
         this.theme = this.themes[Math.floor(Math.random() * this.themes.length)];
         this.phase = 'READY'; // READY -> COUNTDOWN -> ACTIVE -> INTERMISSION
@@ -2726,11 +3376,15 @@ class GameUltimo {
 
     renderActive() {
         const cards = this.alivePlayers.map(p => {
-            const cardHTML = window.generateCardHTML(p).replace('width: 104px; height: 148px;', 'width: 78px; height: 110px; font-size:0.7em;');
+            const cardHTML = window.generateCardHTML(p, '', '', null, false).replace('width: 104px; height: 148px;', 'width: 82px; height: 116px; font-size:0.72em;');
             return `
-                <div onclick="minigames.eliminateUltimo('${p.id}')" style="cursor:pointer; position:relative; transition:transform 0.2s;" class="touch-scale">
-                    ${cardHTML}
-                    <div style="margin-top:4px; font-size:0.7em; font-weight:900; color:var(--pop-magenta); text-align:center;">Toque se falhou</div>
+                <div onclick="minigames.eliminateUltimo('${p.id}')" style="cursor:pointer; position:relative; transition:transform 0.15s; padding:4px;" class="touch-scale">
+                    <div style="pointer-events:none;">
+                        ${cardHTML}
+                    </div>
+                    <div style="margin-top:6px; font-size:0.75em; font-weight:900; color:var(--pop-magenta); text-align:center; pointer-events:none; text-transform:uppercase;">
+                        💀 Falhou
+                    </div>
                 </div>
             `;
         }).join('');
@@ -2740,10 +3394,10 @@ class GameUltimo {
                 <span style="font-size:0.8em; font-weight:900; color:var(--pop-magenta); text-transform:uppercase; letter-spacing:1px;">TEMA LIBERADO 🔥</span>
                 <h1 style="color:var(--pop-yellow); font-size:1.8em; font-weight:900; margin:6px 0; line-height:1.1; text-shadow:0 2px 8px rgba(0,0,0,0.5);">${this.theme}</h1>
                 <p style="color:var(--pop-cyan); font-size:0.85em; font-weight:800; margin-top:4px;">Quem foi o ÚLTIMO a falar, gaguejou ou repetiu?</p>
-                <div style="font-size:0.8em; font-weight:900; color:var(--ink-muted); margin-top:4px;">Restam ${this.alivePlayers.length} de ${this.players.length} na disputa</div>
+                <div style="font-size:0.8em; font-weight:900; color:var(--ink-muted); margin-top:4px;">Toque na carta de quem errou para eliminar!</div>
             </div>
 
-            <div style="display:flex; flex-wrap:wrap; gap:10px; justify-content:center; margin:12px 0;">
+            <div style="display:flex; flex-wrap:wrap; gap:12px; justify-content:center; margin:14px 0;">
                 ${cards}
             </div>
 
@@ -2784,7 +3438,7 @@ class GameUltimo {
                 
                 <hr style="border:none; border-top:1px dashed rgba(255,255,255,0.15); margin:12px 0;">
                 
-                <p style="font-size:0.8em; font-weight:900; color:var(--pop-yellow); text-transform:uppercase;">Guerreiros Ainda Vivos (${this.alivePlayers.length}):</p>
+                <p style="font-size:0.8em; font-weight:900; color:var(--pop-yellow); text-transform:uppercase;">Ainda no Jogo (${this.alivePlayers.length}):</p>
                 <div style="display:flex; gap:6px; flex-wrap:wrap; justify-content:center; margin-top:6px;">
                     ${survivorsList}
                 </div>
@@ -2798,7 +3452,7 @@ class GameUltimo {
         this.ended = true;
         clearInterval(this.countdownTimer);
 
-        const champion = this.alivePlayers[0] || { name: 'Guerreiro', id: 'p_none' };
+        const champion = this.alivePlayers[0] || { name: 'Jogador', id: 'p_none' };
         const losersList = this.eliminated.map(p => p.id);
 
         const mutations = [
@@ -2811,7 +3465,7 @@ class GameUltimo {
             titleColor: 'var(--pop-green)',
             detailHTML: `
                 <p style="font-weight:900; font-size:1.2em; color:var(--pop-yellow);">🏆 Campeão com Reflexo de Ouro: <b>${champion.name}</b> (+25 Pts)!</p>
-                <p style="font-size:0.85em; color:var(--ink-muted); margin-top:4px;">${this.eliminated.length} jogador(es) foram eliminados por lentidão.</p>
+                <p style="font-size:0.85em; color:var(--ink-muted); margin-top:4px;">${this.eliminated.length === 1 ? '1 jogador foi eliminado' : `${this.eliminated.length} jogadores foram eliminados`} por lentidão.</p>
             `,
             scoreMutations: mutations,
             losers: losersList,
@@ -2832,17 +3486,263 @@ class GameUltimo {
 }
 
 // ==========================================
-// FAÇADES GLOBAIS DE CONTROLE
+// ANIMAÇÃO 2.5D & FÍSICA DE BARALHO (GAME FEEL)
 // ==========================================
-minigames.startGameRouter = function() {
-    runner.launch(window.GIW.store.currentGameActive);
+minigames._isPassingTurn = false;
+
+minigames.animateCardReveal = function(show) {
+    if (minigames._isPassingTurn) return;
+    const card = document.getElementById('reveal-vault-card');
+    const cover = document.getElementById('secret-cover');
+    const btnNext = document.getElementById('btn-next-player');
+    if (!card || !cover) return;
+
+    if (show) {
+        if (typeof window.gsap !== 'undefined') {
+            window.gsap.killTweensOf([card, cover]);
+            // Game feel: squash de toque (50ms) seguido de elevação 3D com rotação sutil e brilho
+            window.gsap.fromTo(card, 
+                { scaleX: 0.98, scaleY: 0.96 }, 
+                { 
+                    scaleX: 1.04, 
+                    scaleY: 1.04, 
+                    y: -10, 
+                    rotateX: -6, 
+                    boxShadow: '0 28px 56px -10px rgba(0,0,0,0.85), 0 0 30px rgba(0, 229, 255, 0.35)',
+                    borderColor: 'rgba(0, 229, 255, 0.45)',
+                    duration: 0.28, 
+                    ease: 'power2.out' 
+                }
+            );
+            window.gsap.to(cover, { yPercent: 100, duration: 0.32, ease: 'power3.out' });
+        } else {
+            cover.style.transform = 'translateY(100%)';
+        }
+        if (btnNext) {
+            btnNext.style.display = 'block';
+            if (typeof window.gsap !== 'undefined') {
+                window.gsap.fromTo(btnNext, { scale: 0.85, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.25, ease: 'back.out(2)' });
+            }
+        }
+        window.playSound('card_lift');
+        window.hapticTap();
+    } else {
+        if (window.GIW_boboHelpOpen) return;
+        if (typeof window.gsap !== 'undefined') {
+            window.gsap.killTweensOf([card, cover]);
+            window.gsap.to(card, {
+                scaleX: 1,
+                scaleY: 1,
+                y: 0,
+                rotateX: 0,
+                boxShadow: '0 16px 36px -8px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.06)',
+                borderColor: 'rgba(255, 255, 255, 0.14)',
+                duration: 0.35,
+                ease: 'elastic.out(1, 0.6)'
+            });
+            window.gsap.to(cover, { yPercent: 0, duration: 0.26, ease: 'power3.inOut' });
+        } else {
+            cover.style.transform = 'translateY(0%)';
+        }
+        window.playSound('card_snap');
+    }
 };
 
-minigames.showSecret = () => runner.action('SHOW_SECRET');
-minigames.hideSecret = () => runner.action('HIDE_SECRET');
-minigames.nextTurn = () => runner.action('NEXT_TURN');
+minigames.animateCardPass = function(onTurnSwapped) {
+    minigames._isPassingTurn = true;
+    window.GIW_boboHelpOpen = false;
+    const desc = document.getElementById('bobo-help-desc');
+    if (desc) desc.style.display = 'none';
+
+    const card = document.getElementById('reveal-vault-card');
+    const cover = document.getElementById('secret-cover');
+    const btnNext = document.getElementById('btn-next-player');
+    if (btnNext) btnNext.style.display = 'none';
+
+    if (card && typeof window.gsap !== 'undefined') {
+        window.playSound('whoosh');
+        window.hapticTap();
+        // Desliza a carta para fora pela esquerda com inércia angular
+        window.gsap.to(card, {
+            x: -280,
+            rotation: -10,
+            opacity: 0,
+            duration: 0.22,
+            ease: 'power2.in',
+            onComplete: () => {
+                if (cover) {
+                    window.gsap.set(cover, { yPercent: 0 });
+                }
+                // Troca os dados do jogador e da palavra
+                if (typeof onTurnSwapped === 'function') onTurnSwapped();
+                // Nova carta entra pela direita com física elástica
+                window.gsap.fromTo(card,
+                    { x: 280, rotation: 10, opacity: 0, scale: 0.94 },
+                    { 
+                        x: 0, 
+                        rotation: 0, 
+                        opacity: 1, 
+                        scale: 1, 
+                        duration: 0.36, 
+                        ease: 'back.out(1.4)',
+                        onComplete: () => {
+                            minigames._isPassingTurn = false;
+                        }
+                    }
+                );
+            }
+        });
+    } else {
+        if (cover) cover.style.transform = 'translateY(0%)';
+        if (typeof onTurnSwapped === 'function') onTurnSwapped();
+        minigames._isPassingTurn = false;
+    }
+};
+
+// Segurança global contra cartas travadas no release de toque
+if (typeof window !== 'undefined') {
+    const handleGlobalRelease = () => {
+        const screen = document.getElementById('screen-reveal');
+        if (screen && screen.classList.contains('active') && !window.GIW_boboHelpOpen && !minigames._isPassingTurn) {
+            minigames.hideSecret();
+        }
+    };
+    window.addEventListener('pointerup', handleGlobalRelease, { passive: true });
+    window.addEventListener('pointercancel', handleGlobalRelease, { passive: true });
+}
+
+// ==========================================
+// FAÇADES GLOBAIS DE CONTROLE
+// ==========================================
+minigames._isStarting = false;
+minigames.startGameRouter = function() {
+    if (minigames._isStarting) return;
+    minigames._isStarting = true;
+    const btn = document.getElementById('btn-start-game-lobby');
+    if (btn) btn.style.pointerEvents = 'none';
+
+    try {
+        runner.launch(window.GIW.store.currentGameActive);
+    } finally {
+        setTimeout(() => {
+            minigames._isStarting = false;
+            if (btn) btn.style.pointerEvents = 'auto';
+        }, 500);
+    }
+};
+
+window.GIW_boboHelpOpen = false;
+minigames.toggleBoboHelp = function(e) {
+    if (e) {
+        if (e.stopPropagation) e.stopPropagation();
+        if (e.preventDefault) e.preventDefault();
+    }
+    const desc = document.getElementById('bobo-help-desc');
+    const icon = document.getElementById('bobo-help-icon');
+    if (!desc) return;
+    const isHidden = desc.style.display === 'none' || !desc.style.display;
+    desc.style.display = isHidden ? 'block' : 'none';
+    if (icon) icon.innerText = isHidden ? '✕' : 'ℹ️';
+
+    const cov = document.getElementById('secret-cover');
+    if (cov) {
+        if (isHidden) {
+            if (typeof window.gsap !== 'undefined') {
+                window.gsap.to(cov, { yPercent: 100, duration: 0.2 });
+            } else {
+                cov.style.transform = 'translateY(100%)';
+            }
+            window.GIW_boboHelpOpen = true;
+        } else {
+            window.GIW_boboHelpOpen = false;
+        }
+    }
+    if (typeof window.hapticTap === 'function') window.hapticTap();
+    if (typeof window.playSound === 'function') window.playSound('pop');
+};
+
+minigames.showSecret = (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    runner.action('SHOW_SECRET');
+};
+minigames.hideSecret = (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    runner.action('HIDE_SECRET');
+};
+minigames.nextTurn = () => {
+    if (minigames._isPassingTurn) return;
+    const btnNext = document.getElementById('btn-next-player');
+    if (btnNext) btnNext.style.pointerEvents = 'none';
+    runner.action('NEXT_TURN');
+    setTimeout(() => {
+        if (btnNext) btnNext.style.pointerEvents = 'auto';
+    }, 400);
+};
 minigames.startVoting = () => runner.action('START_VOTING');
 minigames.castVote = (id) => runner.action('CAST_VOTE', id);
+
+minigames.selectedVotePlayerId = null;
+
+minigames.selectVoteTarget = function(el, pId) {
+    minigames.selectedVotePlayerId = pId;
+    const grid = document.getElementById('vote-list-container');
+    if (grid) {
+        grid.querySelectorAll('.studio-vote-item').forEach(item => item.classList.remove('is-selected'));
+    }
+    if (el) el.classList.add('is-selected');
+
+    const btn = document.getElementById('btn-confirm-vote');
+    if (btn) {
+        btn.style.opacity = '1';
+        btn.style.pointerEvents = 'auto';
+        if (typeof window.gsap !== 'undefined') {
+            window.gsap.fromTo(btn, { scale: 0.94 }, { scale: 1, duration: 0.16, ease: 'back.out(2)' });
+        }
+    }
+    window.playSound('pop');
+    window.hapticTap();
+};
+
+minigames.confirmVoteSelection = function() {
+    if (minigames._accusing || !minigames.selectedVotePlayerId) return;
+    const btn = document.getElementById('btn-confirm-vote');
+    if (btn) {
+        btn.style.opacity = '0.5';
+        btn.style.pointerEvents = 'none';
+    }
+    const pId = minigames.selectedVotePlayerId;
+    const grid = document.getElementById('vote-list-container');
+    const selectedEl = grid ? grid.querySelector('.studio-vote-item.is-selected') : null;
+    minigames.accuse(selectedEl, pId);
+};
+
+// Tribunal: carimbo "ACUSADO" tátil antes de abrir o veredito
+minigames.accuse = function(cardEl, id) {
+    if (minigames._accusing) return;
+    minigames._accusing = true;
+    const container = document.getElementById('vote-list-container');
+    const all = container ? Array.from(container.querySelectorAll('.studio-vote-item, .vote-card-btn')) : [];
+    all.forEach(el => { if (el !== cardEl) el.classList.add('vote-dimmed'); });
+    if (cardEl) {
+        cardEl.classList.add('vote-picked');
+        const stamp = document.createElement('div');
+        stamp.className = 'vote-stamp';
+        stamp.innerText = 'ACUSADO!';
+        cardEl.style.position = 'relative';
+        cardEl.appendChild(stamp);
+        if (typeof window.gsap !== 'undefined') {
+            window.gsap.fromTo(stamp, { scale: 3.2, opacity: 0, rotation: -22 }, { scale: 1, opacity: 1, rotation: -10, duration: 0.28, ease: 'back.out(2.2)' });
+            window.gsap.fromTo(cardEl, { scale: 0.96 }, { scale: 1.05, duration: 0.2, ease: 'power2.out' });
+        }
+    }
+    window.playSound('card_snap');
+    window.playSound('badum');
+    window.vibrar(80);
+    setTimeout(() => {
+        minigames._accusing = false;
+        runner.action('CAST_VOTE', id);
+    }, 650);
+};
 
 minigames.movePos = (idx, dir) => runner.action('MOVE_POS', { idx, dir });
 minigames.verifyPos = () => runner.action('VERIFY_POS');
@@ -2861,54 +3761,32 @@ minigames.hitWord = (p) => runner.action('WORD_HIT', p);
 minigames.skipWord = () => runner.action('WORD_SKIP');
 minigames.passTurn = () => runner.action('PASS_TURN');
 minigames.pickMimicaCard = (idx) => runner.action('PICK_MIMICA_CARD', idx);
+minigames.nextMimicaActor = () => runner.action('NEXT_MIMICA_ACTOR');
 
 minigames.nextLetter = () => runner.action('NEXT_LETTER');
 minigames.triggerStopElimination = () => runner.action('TRIGGER_STOP_ELIM');
 minigames.continueStopRound = (cat, letter) => runner.action('CONTINUE_STOP', { cat, letter });
+minigames.sortearOutroTemaStop = () => runner.action('REROLL_STOP');
+minigames.selectSeviraChallenger = (id) => runner.action('SELECT_SEVIRA_CHALLENGER', id);
+minigames.adjustSeviraGoal = (delta) => runner.action('ADJUST_SEVIRA_GOAL', delta);
+minigames.startSeviraRun = () => runner.action('START_SEVIRA_RUN');
+minigames.hitSeviraItem = () => runner.action('HIT_SEVIRA_ITEM');
+minigames.finishSeviraSuccess = () => runner.action('FINISH_SEVIRA_SUCCESS');
+minigames.finishSeviraFail = () => runner.action('FINISH_SEVIRA_FAIL');
 minigames.passSevira = () => runner.action('PASS_SEVIRA');
 minigames.continueSeviraRound = (cat) => runner.action('CONTINUE_SEVIRA', cat);
+minigames.revealCincoObjective = () => runner.action('REVEAL_CINCO');
 minigames.startCinco = () => runner.action('START_CINCO');
 minigames.finishCinco = (win) => runner.action('FINISH_CINCO', win);
 minigames.passBatata = () => runner.action('PASS_BATATA');
+minigames.explodeBatataNow = () => runner.action('EXPLODE_BATATA_NOW');
 minigames.continueBatataRound = () => runner.action('CONTINUE_BATATA');
-minigames.eliminateUltimo = (id) => runner.action('ELIMINATE_ULTIMO', id);
+minigames.eliminateUltimo = (id) => {
+    window.playSound('pop');
+    window.hapticTap();
+    runner.action('ELIMINATE_ULTIMO', id);
+};
 minigames.startUltimoCountdown = () => runner.action('START_ULTIMO_CD');
 minigames.playerFault = (id) => runner.action('FAULT', id);
 minigames.surrenderMacabro = () => runner.action('SURRENDER_MACABRO');
 minigames.finishDirect = () => runner.action('FINISH_DIRECT');
-
-minigames.buySabotage = function(item, cost) {
-    const store = window.GIW.store;
-    const runner = window.GIW.runner;
-    const activeGame = runner?.activeGame;
-    if (!activeGame) return;
-
-    let balance = 0;
-    let deductFn = null;
-
-    if (activeGame.teamScores) {
-        const tid = activeGame.activeTeam || 0;
-        balance = activeGame.teamScores[tid] || 0;
-        deductFn = (amount) => { activeGame.teamScores[tid] -= amount; };
-    } else if (typeof activeGame.score === 'number') {
-        balance = activeGame.score;
-        deductFn = (amount) => { activeGame.score -= amount; };
-    } else {
-        const p = activeGame.players?.[0] || store.players[0];
-        balance = p?.score || 0;
-        deductFn = (amount) => { if (p) p.score = Math.max(0, p.score - amount); };
-    }
-
-    let finalCost = cost;
-    if (store.isMarioKart) finalCost = Math.floor(cost / 2);
-
-    if (balance < finalCost) {
-        return window.showCustomAlert("Sem Saldo", `Você precisa de ${finalCost} Pts para comprar esta sabotagem!`, "❌");
-    }
-
-    if (deductFn) deductFn(finalCost);
-    runner.action('SABOTAGE', item);
-    window.playSound('glitch');
-    appCore.closeModal('store-modal');
-    window.showCustomAlert("Sabotagem Ativada!", `Você comprou ${item.toUpperCase()} por ${finalCost} Pts!`, "🛒");
-};

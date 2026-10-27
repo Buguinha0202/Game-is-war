@@ -3,15 +3,41 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>Game is War 3.0 - Neo-Brutalism Arcade</title>
+
+    <!-- Limpeza de Service Workers e Caches Fantasmas de sessões anteriores -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(regs => {
+                for (const reg of regs) reg.unregister();
+            });
+        }
+        if ('caches' in window) {
+            caches.keys().then(keys => {
+                for (const k of keys) caches.delete(k);
+            });
+        }
+        window.__ASSET_VERSION__ = Date.now();
+    </script>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
 
-    <link rel="stylesheet" href="style.css">
-    <link rel="stylesheet" href="style-juice.css">
+    <!-- CSS com Cache-Buster Automático por Timestamp -->
+    <script>
+        document.write('<link rel="stylesheet" href="style.css?v=' + window.__ASSET_VERSION__ + '">');
+        document.write('<link rel="stylesheet" href="style-juice.css?v=' + window.__ASSET_VERSION__ + '">');
+    </script>
+    <noscript>
+        <link rel="stylesheet" href="style.css">
+        <link rel="stylesheet" href="style-juice.css">
+    </noscript>
 </head>
 <body>
     <div id="flash-overlay" class="flash-overlay"></div>
@@ -30,19 +56,74 @@
 
     <!-- ================= DOCK DE NAVEGAÇÃO ================= -->
     <div class="bottom-nav">
-        <div class="nav-item active" id="nav-btn-home" onclick="appCore.nav('screen-home')">🏠</div>
-        <div class="nav-item" id="nav-btn-players" onclick="appCore.nav('screen-players')">
-            🛡️<div class="nav-badge" id="nav-player-count">0</div>
-        </div>
-        <div class="nav-item" id="nav-btn-tourney" onclick="appCore.openTourneySetup()">🏆</div>
+        <button type="button" class="nav-item active" id="nav-btn-home" onclick="appCore.nav('screen-home')" aria-label="Jogos">
+            <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="6" x2="10" y1="12" y2="12"></line>
+                <line x1="8" x2="8" y1="10" y2="14"></line>
+                <line x1="15" x2="15.01" y1="13" y2="13"></line>
+                <line x1="18" x2="18.01" y1="11" y2="11"></line>
+                <rect width="20" height="12" x="2" y="6" rx="6"></rect>
+            </svg>
+            <span class="nav-label">Jogos</span>
+        </button>
+
+        <button type="button" class="nav-item" id="nav-btn-players" onclick="appCore.nav('screen-players')" aria-label="Mesa">
+            <div class="nav-icon-wrap">
+                <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="9" cy="7" r="4"></circle>
+                    <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                </svg>
+                <div class="nav-badge" id="nav-player-count">0</div>
+            </div>
+            <span class="nav-label">Mesa</span>
+        </button>
+
+        <button type="button" class="nav-item" id="nav-btn-tourney" onclick="appCore.openTourneySetup()" aria-label="Torneio">
+            <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path>
+                <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path>
+                <path d="M4 22h16"></path>
+                <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"></path>
+                <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"></path>
+                <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"></path>
+            </svg>
+            <span class="nav-label">Torneio</span>
+        </button>
     </div>
 
-    <!-- ================= 1. MENU PRINCIPAL (OS 16 JOGOS) ================= -->
-    <div id="screen-home" class="screen active">
-        <div class="app-header">
-            <div class="brand-badge">⚔️ Game is War</div>
-            <div style="display:flex; gap:8px; align-items:center;">
-                <button class="nav-icon-btn" onclick="appCore.openModal('settings-modal')" title="Configurações">⚙️</button>
+    <!-- ================= 1. MENU PRINCIPAL (HUB STUDIO CLEAN) ================= -->
+    <div id="screen-home" class="screen active" style="overflow-y: auto; padding-bottom: 90px;">
+        <!-- Topo Sticky Coeso: Header + Filtros integrados que nunca são tampados -->
+        <div class="home-sticky-top">
+            <div class="app-header" style="border-bottom: none; box-shadow: none; background: transparent;">
+                <div class="brand-badge">⚔️ Game is War</div>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <button class="nav-icon-btn" onclick="appCore.sortearMinigame()" title="Sortear Jogo" style="font-size:1.15rem;">🎲</button>
+                    <button class="nav-icon-btn" onclick="appCore.openModal('settings-modal')" title="Configurações">⚙️</button>
+                </div>
+            </div>
+
+            <!-- Filtros em Pills Horizontais integrados -->
+            <div class="home-filter-scroll-wrap">
+                <div class="home-filter-bar">
+                    <button class="filter-pill active" onclick="appCore.setHomeFilter('all', this)">
+                        🔥 Todos <span class="filter-count">15</span>
+                    </button>
+                    <button class="filter-pill" onclick="appCore.setHomeFilter('strategy', this)">
+                        🕵️ Blefe
+                    </button>
+                    <button class="filter-pill" onclick="appCore.setHomeFilter('mind', this)">
+                        🎯 Sintonia
+                    </button>
+                    <button class="filter-pill" onclick="appCore.setHomeFilter('team', this)">
+                        👥 Equipes
+                    </button>
+                    <button class="filter-pill" onclick="appCore.setHomeFilter('adrenaline', this)">
+                        ⚡ Adrenalina
+                    </button>
+                </div>
             </div>
         </div>
 
@@ -50,51 +131,33 @@
             🌀 MODO CAOS ATIVADO (Conteúdo Extremo)
         </div>
 
-        <!-- ================= SHOWCASE CENTRAL (1 JOGO POR VEZ) ================= -->
-        <div class="showcase-stage">
-            <button class="showcase-nav-btn" onclick="appCore.showcaseNav(-1)" aria-label="Jogo Anterior">❮</button>
-            
-            <div id="showcase-card-wrapper" class="showcase-card-wrapper">
-                <div id="showcase-active-card" class="showcase-card cat-strategy">
-                    <!-- Preenchido dinamicamente via appCore.renderShowcaseCard() -->
-                </div>
+        <!-- Grid de Jogos Studio Clean Minimalista -->
+        <div class="home-games-section">
+            <div id="home-games-grid" class="home-games-grid">
+                <!-- Renderizado dinamicamente via appCore.renderHomeGrid() -->
             </div>
-
-            <button class="showcase-nav-btn" onclick="appCore.showcaseNav(1)" aria-label="Próximo Jogo">❯</button>
-        </div>
-
-        <!-- Indicador de Posição / Contador -->
-        <div class="showcase-counter-bar">
-            <div id="showcase-indicator-text" class="showcase-count-badge">Jogo 1 de 15</div>
-            <div id="showcase-dots" class="showcase-dots-track"></div>
-        </div>
-
-        <!-- BOTÕES DE APOIO INFERIORES -->
-        <div class="showcase-actions-bar">
-            <button class="btn btn-warning showcase-action-btn" onclick="appCore.sortearMinigame()">
-                🎲 SORTEAR JOGO
-            </button>
-            <button class="btn btn-dark showcase-action-btn" onclick="appCore.abrirCatalogoCompleto()">
-                📑 TODOS OS JOGOS (15)
-            </button>
         </div>
     </div>
 
-    <!-- ================= 2. SQUAD DE GUERREIROS ================= -->
+    <!-- ================= 2. JOGADORES NA MESA ================= -->
     <div id="screen-players" class="screen">
         <div class="app-header">
-            <div class="title-sub">Guerreiros da Mesa</div>
+            <div class="title-sub">Jogadores na Mesa</div>
             <div style="display:flex; gap:8px;">
                 <button class="btn btn-warning btn-sm" onclick="appCore.gerarTurmaMagica()">MÁGICA 🪄</button>
-                <button class="btn btn-danger btn-sm" onclick="appCore.zerarTodosJogadores()">ZERAR</button>
+                <button class="btn btn-danger btn-sm" onclick="appCore.zerarTodosJogadores()">LIMPAR MESA</button>
             </div>
         </div>
-        <div style="padding: 16px;"><button class="btn btn-primary" onclick="appCore.abrirCriador()">+ FORJAR NOVO GUERREIRO</button></div>
+        <div style="padding: 16px;"><button class="btn btn-primary" onclick="appCore.abrirCriador()">+ ADICIONAR JOGADOR</button></div>
         <div id="players-card-grid" style="display: flex; flex-wrap: wrap; gap: 14px; padding: 0 16px; justify-content: center;">
-            <p style="color:var(--ink-muted); font-weight:800; text-align:center; width:100%; margin-top:20px;">Nenhum guerreiro forjado.</p>
+            <p style="color:var(--ink-muted); font-weight:800; text-align:center; width:100%; margin-top:20px;">Nenhum jogador adicionado ainda.</p>
         </div>
-        <div style="padding: 16px; margin-top: 15px;">
-            <button id="btn-encerrar-noite" class="btn btn-danger" style="display: none;" onclick="appCore.encerrarNoite()">🏁 ENCERRAR NOITE (PÓDIO)</button>
+        <div style="padding: 16px; margin-top: 15px; display: flex; flex-direction: column; gap: 10px;">
+            <button id="btn-encerrar-noite" class="studio-btn-cta studio-btn-retro" style="display: none;" onclick="appCore.encerrarNoite()">
+                <span class="retro-icon-sparkle">✨</span>
+                <span>RETROSPECTIVA DA NOITE</span>
+                <span class="retro-btn-chip">WRAPPED 🏆</span>
+            </button>
         </div>
     </div>
 
@@ -118,8 +181,8 @@
                     </div>
                 </div>
                 <div class="duo-stage-controls">
-                    <input type="text" id="duo-name-input" class="duo-name-input" placeholder="NOME DO GUERREIRO" maxlength="12" autocomplete="off" autocorrect="off" spellcheck="false" />
-                    <button class="duo-btn-random" onclick="appCore.randomizeDuoAvatar()" title="Sortear Guerreiro Aleatório">🎲 DADO MÁGICO</button>
+                    <input type="text" id="duo-name-input" class="duo-name-input" placeholder="NOME DO JOGADOR" maxlength="12" autocomplete="off" autocorrect="off" spellcheck="false" />
+                    <button class="duo-btn-random" onclick="appCore.randomizeDuoAvatar()" title="Sortear Jogador Aleatório">🎲 DADO MÁGICO</button>
                 </div>
             </div>
 
@@ -143,34 +206,31 @@
         <div class="header-sub">
             <button class="nav-icon-btn" onclick="appCore.nav('screen-home')">←</button>
             <div class="title-sub" id="lobby-title">Lobby</div>
-            <button class="nav-icon-btn" style="background:var(--pop-cyan); color:var(--ink-black);" onclick="appCore.showGameRules()" title="Como Jogar">📖</button>
-        </div>
-        
-        <!-- Banner Interativo de Instruções Rápidas -->
-        <div style="padding: 10px 18px 0 18px;">
-            <div id="lobby-rules-banner" onclick="appCore.showGameRules()" style="background: linear-gradient(135deg, rgba(0, 229, 255, 0.12), rgba(255, 230, 0, 0.08)); border: 2px dashed var(--pop-cyan); border-radius: 14px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);">
-                <div style="display:flex; align-items:center; gap:10px;">
-                    <span id="lobby-rules-icon" style="font-size:1.6em;">📖</span>
-                    <div>
-                        <div style="font-weight:900; font-size:0.86em; color:var(--pop-cyan); letter-spacing:0.5px;">COMO JOGAR ESTE MINIGAME</div>
-                        <div id="lobby-rules-tagline" style="font-size:0.75em; color:var(--ink-muted); font-weight:700;">Toque para ver o guia passo a passo</div>
-                    </div>
-                </div>
-                <span style="font-weight:900; color:var(--pop-yellow); font-size:1.1em;">➔</span>
+            <div style="display:flex; gap:6px;">
+                <button class="nav-icon-btn" id="btn-lobby-settings-nav" style="background:rgba(255,255,255,0.08); color:#fff; border-color:rgba(255,255,255,0.15);" onclick="appCore.openModal('lobby-settings-modal')" title="Ajustes da Rodada">⚙️</button>
+                <button class="nav-icon-btn" style="background:rgba(6, 182, 212, 0.15); color:var(--pop-cyan); border-color:rgba(6, 182, 212, 0.35);" onclick="appCore.showGameRules()" title="Como Jogar">📖</button>
             </div>
         </div>
-
-        <div id="game-specific-configs" style="padding: 14px 18px 0 18px;"></div>
-
-        <div style="padding: 12px 18px;">
-            <button class="btn btn-dark" style="font-size:0.95em;" onclick="appCore.toggleAposta()" id="btn-lobby-aposta">🎲 Aposta de Sangue (Desligada)</button>
+        
+        <div id="lobby-settings-btn-row" style="padding: 10px 18px 4px 18px;">
+            <button type="button" class="btn-clean" onclick="appCore.openModal('lobby-settings-modal')" style="width: 100%; padding: 12px 14px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.09); border-radius: 16px; color: #fff; font-weight: 800; font-size: 0.85rem; display: flex; align-items: center; justify-content: space-between; cursor: pointer; transition: background 0.15s ease;">
+                <span style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:1.15em;">⚙️</span> Ajustes da Rodada
+                </span>
+                <span id="lobby-settings-badge" style="font-size:0.78rem; color:var(--pop-yellow); font-weight:700; background:rgba(255,230,0,0.1); padding:4px 10px; border-radius:999px; border:1px solid rgba(255,230,0,0.25);">Configurar ➔</span>
+            </button>
         </div>
         
-        <p style="color:var(--ink-muted); text-align:center; font-size:0.9em; margin-bottom:8px; font-weight:900;">Toque para mover entre Equipes ou Reserva:</p>
-        <div id="lobby-teams-container" style="flex-grow:1; overflow-y:auto; display:flex; flex-direction:column; gap:12px; padding:0 18px 20px 18px;"></div>
+        <span style="color:var(--ink-muted); text-align:center; font-size:0.8em; margin:8px 0 8px 0; font-weight:600;">Toque em um jogador para alternar entre as equipes ou reserva</span>
+        <div id="lobby-teams-container" style="flex-grow:1; overflow-y:auto; display:flex; flex-direction:column; gap:10px; padding:0 18px 16px 18px;"></div>
         
-        <div style="padding: 0 18px 18px 18px;">
-            <button class="btn btn-primary" onclick="minigames.startGameRouter()">▶️ Iniciar Missão</button>
+        <div style="padding: 10px 18px 20px 18px;">
+            <button class="studio-btn-cta" id="btn-start-game-lobby" onclick="minigames.startGameRouter()">
+                <span>JOGAR</span>
+                <span style="opacity:0.35;">|</span>
+                <span id="lobby-player-count-label">JOGADORES</span>
+                <span style="font-size:1.15em;">➔</span>
+            </button>
         </div>
     </div>
 
@@ -178,49 +238,63 @@
     <div id="screen-game-board" class="screen">
         <div class="header-sub">
             <button class="nav-icon-btn" onclick="appCore.stopAudioAndNav('screen-home')">←</button>
-            <div class="title-sub" id="gb-title">Arena</div>
+            <div class="title-sub" id="gb-title">Mesa de Jogo</div>
             <button class="nav-icon-btn" style="background:var(--pop-cyan); color:var(--ink-black);" onclick="appCore.showGameRules()" title="Como Jogar">📖</button>
-        </div>
-        
-        <div style="padding:12px 18px 0 18px; width:100%;">
-            <button class="btn btn-warning" id="btn-in-game-store" style="display:none; margin-bottom:10px;" onclick="appCore.openModal('store-modal')">🛒 Loja Negra</button>
         </div>
 
         <div id="gb-content" style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content:center; width: 100%; padding: 0 18px;"></div>
 
         <div class="soundboard" id="soundboard-ui" style="display:none;">
-            <div class="sb-btn" onclick="window.playSound('cricket')">🦗</div>
-            <div class="sb-btn" onclick="window.playSound('badum')">🥁</div>
-            <div class="sb-btn" onclick="window.playSound('applause')">👏</div>
-            <div class="sb-btn" style="border-color:var(--pop-magenta);" onclick="window.playSound('siren')">🚨</div>
+            <button type="button" class="sb-btn" onclick="window.playSound('cricket'); window.hapticTap();" title="Cri-cri">🦗</button>
+            <button type="button" class="sb-btn" onclick="window.playSound('badum'); window.hapticTap();" title="Ba-dum-tss">🥁</button>
+            <button type="button" class="sb-btn" onclick="window.playSound('applause'); window.hapticTap();" title="Palmas">👏</button>
+            <button type="button" class="sb-btn sb-alert" onclick="window.playSound('siren'); window.hapticTap();" title="Sirene">🚨</button>
         </div>
     </div>
 
-    <!-- ================= 6. CARTA SECRETA DESLIZANTE ================= -->
+    <!-- ================= 6. CARTA SECRETA DESLIZANTE 2.5D ================= -->
     <div id="screen-reveal" class="screen">
-        <div style="text-align:center; display:flex; flex-direction:column; justify-content:center; height:100%; align-items:center; padding: 20px;">
+        <div style="text-align:center; display:flex; flex-direction:column; justify-content:center; height:100%; align-items:center; padding: 16px 20px;">
             <div id="reveal-category-display" class="section-banner" style="display:none; margin-bottom:12px;">Tema: CATEGORIA</div>
             
-            <h2 id="turn-player-name" style="font-size: 2.4em; margin: 0 0 4px 0; color:var(--ink-white);">Nome</h2>
-            <p style="color: var(--ink-muted); margin:0 0 20px 0; font-size:1.05em; font-weight:800;">Passe o celular para este guerreiro.</p>
+            <p style="color: var(--ink-muted); margin:0 0 2px 0; font-size:0.85em; font-weight:800; text-transform:uppercase; letter-spacing:1px;">Passe o celular para</p>
+            <h2 id="turn-player-name" style="font-size: 2.2em; font-weight:900; margin: 0 0 14px 0; color:var(--pop-yellow); text-shadow:0 0 20px rgba(255,230,0,0.3);">Nome</h2>
             
-            <div class="secret-vault-box" 
-                 onpointerdown="minigames.showSecret()" 
-                 onpointerup="minigames.hideSecret()" 
-                 onpointerleave="minigames.hideSecret()">
-                 
-                <div id="secret-card-bg" style="position: absolute; width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--bg-surface); padding: 20px; pointer-events: none;">
-                    <div id="role-title" style="font-size:1.1em; font-weight:900; color:var(--ink-muted); margin-bottom:8px; text-transform:uppercase;">Título</div>
-                    <div id="secret-text" style="font-size:2em; font-weight:900; color:var(--ink-white); text-transform:uppercase; text-align:center;">Palavra</div>
-                </div>
+            <div class="reveal-card-stage">
+                <div class="secret-vault-box studio-player-card" id="reveal-vault-card"
+                     onpointerdown="minigames.showSecret(event)" 
+                     onpointerup="minigames.hideSecret(event)" 
+                     onpointerleave="minigames.hideSecret(event)"
+                     oncontextmenu="event.preventDefault()">
+                     
+                    <div id="secret-card-bg" style="width:100%; height:100%; box-sizing:border-box; display:flex; flex-direction:column; align-items:center; justify-content:space-between; padding:16px 14px;">
+                        <div class="studio-card-header-name" id="reveal-card-player-label" style="font-size:1.15rem; font-weight:900;">Jogador</div>
+                        <div class="studio-card-avatar-body" id="reveal-card-avatar-slot" style="flex:1; display:flex; align-items:center; justify-content:center;">
+                            <span style="font-size:4.2rem;">👤</span>
+                        </div>
+                        <div class="studio-card-role-tag" id="reveal-card-role-tag" style="width:100%; box-sizing:border-box;">
+                            <div class="studio-role-label" id="role-title">TÍTULO</div>
+                            <div id="secret-text" style="font-size:1.15rem; font-weight:900; letter-spacing:0.5px;">Palavra</div>
+                        </div>
+                    </div>
 
-                <div id="secret-cover">
-                    <div style="font-size:4.2em; filter: drop-shadow(2px 2px 0 var(--ink-black));">❓</div>
-                    <div style="font-weight:900; color:var(--ink-black); margin-top:12px; font-size: 1.15em; text-transform: uppercase;">Segure para Abrir</div>
+                    <div id="secret-cover">
+                        <div class="cover-pattern-grid"></div>
+                        <div class="cover-seal">
+                            <span class="cover-icon">🔒</span>
+                            <div class="cover-label">Segure para Revelar</div>
+                        </div>
+                        <div style="position:absolute; bottom:14px; font-size:0.75rem; color:rgba(255,255,255,0.45); font-weight:800; letter-spacing:1.5px;">▲ SEGURE FIRME</div>
+                    </div>
                 </div>
             </div>
             
-            <button id="btn-next-player" class="btn btn-success" style="margin-top: 25px; display: none; max-width: 300px;" onclick="minigames.nextTurn()">ESCONDER E CONTINUAR ➔</button>
+            <div style="width:100%; max-width:320px; margin-top:20px;">
+                <button id="btn-next-player" class="studio-btn-cta" style="display: none;" onclick="minigames.nextTurn()">
+                    <span>JÁ MEMORIZEI</span>
+                    <span style="font-size:1.15em;">➔</span>
+                </button>
+            </div>
         </div>
     </div>
 
@@ -228,25 +302,32 @@
     <div id="screen-vote" class="screen">
         <div class="header-sub">
             <button class="nav-icon-btn" style="visibility:hidden;">←</button>
-            <div class="title-sub" style="color:var(--pop-magenta);">Tribunal da Mesa</div>
+            <div class="title-sub" style="color:#ffffff; font-weight:900;">Quem é o Impostor?</div>
             <div style="width:44px;"></div>
         </div>
-        <p style="text-align: center; color: var(--ink-muted); margin:12px 0; font-weight:900;">Quem será eliminado da rodada?</p>
-        <div id="vote-list-container" style="flex-grow: 1; overflow-y: auto; text-align:center; padding: 0 10px;"></div>
+        <p style="text-align: center; color: var(--ink-muted); margin:4px 0 10px 0; font-weight:700; font-size:0.88rem;">Toque no suspeito que a mesa quer eliminar:</p>
+        
+        <div id="vote-list-container" class="studio-vote-grid" style="flex-grow: 1; overflow-y: auto;"></div>
+
+        <div style="padding: 10px 18px 20px 18px; width:100%; box-sizing:border-box;">
+            <button class="studio-btn-cta" id="btn-confirm-vote" style="opacity: 0.4; pointer-events: none;" onclick="minigames.confirmVoteSelection()">
+                <span>CONFIRMAR VOTO</span>
+                <span style="font-size:1.15em;">➔</span>
+            </button>
+        </div>
     </div>
 
     <div id="screen-verdict" class="screen screen-fullscreen" style="justify-content:center; align-items:center; text-align:center; background:var(--ink-black); overflow:hidden;">
         <div class="verdict-stage" id="verdict-stage">
             <p id="verdict-phase-subtitle" style="color:var(--ink-muted); font-size:1.05em; text-transform:uppercase; letter-spacing:2px; margin-bottom:6px; font-weight:900;">A mesa votou para eliminar:</p>
             <div id="verdict-card-container" class="verdict-target-card-wrap">
-                <div class="verdict-crosshair" id="verdict-crosshair"></div>
-                <div class="verdict-laser-beam" id="verdict-laser"></div>
+                <div class="verdict-spotlight" id="verdict-spotlight"></div>
                 <div id="verdict-player-slot"></div>
                 <div class="verdict-stamp" id="verdict-stamp">INFILTRADO!</div>
             </div>
             <div class="verdict-status-pill" id="verdict-status-badge">
                 <span id="verdict-status-icon">🔍</span>
-                <span id="verdict-status-text">ESCANEANDO BIOMETRIA...</span>
+                <span id="verdict-status-text">A MESA ESTÁ EM SILÊNCIO...</span>
             </div>
             <div id="verdict-extra-reveal" class="verdict-reveal-impostor-box"></div>
         </div>
@@ -282,27 +363,89 @@
         </div>
     </div>
 
-    <!-- ================= 10. TORNEIO ================= -->
-    <div id="screen-tourney-setup" class="screen">
+    <!-- ================= 10. TORNEIO RÁPIDO ================= -->
+    <div id="screen-tourney-setup" class="screen" style="overflow-y:auto; padding-bottom:30px;">
         <div class="header-sub">
             <button class="nav-icon-btn" onclick="appCore.nav('screen-home')">←</button>
             <div class="title-sub" style="color:var(--pop-yellow);">Modo Torneio</div>
             <div style="width:44px;"></div>
         </div>
-        <div style="background:var(--bg-surface); padding:18px; border-radius:24px; border:var(--border-brutal); box-shadow:var(--shadow-brutal); margin:18px;">
-            <p style="color:white; font-weight:900; margin-bottom:8px; text-transform:uppercase;">Pontos para a Vitória:</p>
-            <input type="number" id="tourney-target" value="100" class="brutal-input" style="font-size:2em; color:var(--pop-yellow);">
-            <p style="color:white; font-weight:900; margin:18px 0 10px 0; text-transform:uppercase;">Jogos na Roleta:</p>
-            <div id="tourney-games-list" style="display:flex; flex-wrap:wrap; gap:8px; max-height:220px; overflow-y:auto; margin-bottom:20px;"></div>
-            <button class="btn btn-warning" onclick="appCore.startTourney()">GIRAR A ROLETA 🎰</button>
+
+        <div class="tourney-setup-container">
+            <!-- 1. Duração do Torneio (Presets) -->
+            <div>
+                <div class="tourney-section-title"><span>⏱️</span> Escolha a Duração</div>
+                <div class="tourney-presets-grid">
+                    <div class="tourney-preset-card" id="preset-3" onclick="appCore.selectTourneyPreset(3, this)">
+                        <div class="preset-icon">⚡</div>
+                        <div class="preset-name">Blitz</div>
+                        <div class="preset-rounds">3 Jogos</div>
+                        <div class="preset-meta">~8 min</div>
+                    </div>
+                    <div class="tourney-preset-card active" id="preset-5" onclick="appCore.selectTourneyPreset(5, this)">
+                        <div class="preset-icon">🏆</div>
+                        <div class="preset-name">Padrão</div>
+                        <div class="preset-rounds">5 Jogos</div>
+                        <div class="preset-meta">~15 min</div>
+                    </div>
+                    <div class="tourney-preset-card" id="preset-7" onclick="appCore.selectTourneyPreset(7, this)">
+                        <div class="preset-icon">⚔️</div>
+                        <div class="preset-name">Guerra</div>
+                        <div class="preset-rounds">7 Jogos</div>
+                        <div class="preset-meta">~25 min</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. Curadoria dos Minigames -->
+            <div>
+                <div class="tourney-section-title"><span>🎲</span> Estilo dos Jogos</div>
+                <div class="tourney-mode-selector">
+                    <div class="tourney-mode-chip active" id="chip-mode-balanced" onclick="appCore.selectTourneyMode('balanced', this)">
+                        🎯 Misto Equilibrado
+                    </div>
+                    <div class="tourney-mode-chip" id="chip-mode-chaos" onclick="appCore.selectTourneyMode('chaos', this)">
+                        🌀 Caos Total (Todos)
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. Guerreiros na Disputa -->
+            <div>
+                <div class="tourney-section-title"><span>🛡️</span> Jogadores na Disputa (<span id="tourney-roster-count">0</span>)</div>
+                <div id="tourney-roster-shelf" class="tourney-roster-shelf">
+                    <!-- Preenchido via appCore.renderTourneyRoster() -->
+                </div>
+            </div>
+
+            <!-- 4. Botão de Início -->
+            <button class="btn btn-warning" id="btn-start-tourney-cta" style="font-size:1.1em; padding:16px; margin-top:8px;" onclick="appCore.startTourney()">
+                🚀 INICIAR TORNEIO (5 JOGOS)
+            </button>
         </div>
     </div>
 
-    <div id="screen-tourney-spin" class="screen screen-fullscreen" style="justify-content:center; align-items:center; background:var(--ink-black);">
-        <h2 style="color:var(--pop-yellow); font-size:2.2em; font-weight:900; margin-bottom:25px; text-transform:uppercase;">Sorteando Jogo...</h2>
-        <div style="width:100%; height:130px; border-top:var(--border-brutal-lg); border-bottom:var(--border-brutal-lg); background:var(--bg-surface); position:relative; overflow:hidden; display:flex; align-items:center;">
-            <div id="roulette-track" style="display:flex; position:absolute; left:50%; white-space:nowrap;"></div>
-            <div style="position:absolute; left:50%; top:0; bottom:0; width:5px; background:var(--pop-magenta); transform:translateX(-50%); z-index:10; box-shadow:0 0 10px var(--pop-magenta);"></div>
+    <div id="screen-tourney-spin" class="screen screen-fullscreen" style="background:var(--ink-black);">
+        <div class="tourney-spin-wrapper">
+            <div id="tourney-spin-indicator" class="tourney-spin-pill">
+                <span>⚡</span> RODADA 1 DE 5
+            </div>
+            <h2 class="tourney-spin-title">Sorteando o Jogo</h2>
+            
+            <div class="tourney-spin-stage">
+                <!-- Ponteiro e Linha Central Neon -->
+                <div class="tourney-pointer-line"></div>
+                <div class="tourney-pointer-marker-top"></div>
+                <div class="tourney-pointer-marker-bottom"></div>
+
+                <!-- Trilho horizontal da roleta -->
+                <div id="roulette-track" class="roulette-track"></div>
+            </div>
+
+            <!-- Botão de pular para grupos rápidos -->
+            <button class="tourney-spin-skip-btn" onclick="window.skipTournamentSpin()">
+                <span>Pular Animação</span> ⏩
+            </button>
         </div>
     </div>
 
@@ -320,7 +463,7 @@
                 <div class="podio-crown">👑</div>
                 <div class="podio-champ-badge">CAMPEÃO SUPREMO</div>
                 <div id="podio-champ-avatar" class="podio-champ-avatar"></div>
-                <h2 id="podio-champ-name" class="podio-champ-name">Guerreiro</h2>
+                <h2 id="podio-champ-name" class="podio-champ-name">Jogador</h2>
                 <div id="podio-champ-pts" class="podio-champ-pts">0 PONTOS</div>
             </div>
 
@@ -381,43 +524,212 @@
         </div>
     </div>
 
-    <!-- ================= MODAIS ================= -->
+    <!-- ================= 12. RETROSPECTIVA DA NOITE (CINEMATIC WRAPPED) ================= -->
+    <div id="screen-retrospectiva" class="screen screen-fullscreen screen-retro" style="display: none;">
+        <!-- Canvas de Partículas Cósmicas e Luzes 2.5D de Fundo -->
+        <canvas id="retro-ambient-canvas" class="retro-ambient-canvas"></canvas>
+
+        <!-- Barra de Progresso Stories no Topo -->
+        <div class="retro-stories-header">
+            <div class="retro-progress-track" id="retro-progress-track">
+                <!-- Segmentos injetados dinamicamente via JS -->
+            </div>
+            <div class="retro-hud-row">
+                <div class="retro-hud-tag" id="retro-hud-tag">CAPÍTULO 1 DE 7</div>
+                <div class="retro-hud-actions">
+                    <button type="button" class="retro-icon-pill" id="retro-btn-pause" onclick="appCore.retroTogglePause()" aria-label="Pausar ou Continuar" title="Pausar / Retomar">⏸️</button>
+                    <button type="button" class="retro-icon-pill" id="retro-btn-sound" onclick="appCore.retroToggleSound()" aria-label="Som" title="Som">🔊</button>
+                    <button type="button" class="retro-skip-pill" onclick="appCore.retroSkipToEnd()" aria-label="Pular animação" title="Pular">PULAR ⏩</button>
+                    <button type="button" class="retro-close-pill" onclick="appCore.retroClose()" aria-label="Fechar" title="Fechar">✕</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Áreas de Toque para Gestos estilo Instagram/TikTok Stories -->
+        <div class="retro-tap-area retro-tap-left" onclick="appCore.retroPrevSlide()" title="Voltar (Toque ou Seta Esquerda)"></div>
+        <div class="retro-tap-area retro-tap-right" onclick="appCore.retroNextSlide()" title="Avançar (Toque ou Seta Direita)"></div>
+
+        <!-- Palco Central 2.5D (Slides Animados via GSAP) -->
+        <div class="retro-stage-viewport" id="retro-stage-viewport">
+            <!-- Slide 0: Abertura Dramática -->
+            <div class="retro-slide active" id="retro-slide-0">
+                <div class="retro-intro-glow"></div>
+                <div class="retro-intro-eyebrow">HORA DA VERDADE</div>
+                <h1 class="retro-intro-title">RETROSPECTIVA<br><span class="gradient-text">DA NOITE</span></h1>
+                <p class="retro-intro-desc">As máscaras caíram, as amizades foram testadas e a glória foi disputada.<br>Veja agora quem dominou e quem virou meme hoje!</p>
+                <div class="retro-intro-badge-row">
+                    <span class="retro-pill-badge">✨ Animação Especial</span>
+                    <span class="retro-pill-badge" id="retro-player-pill">0 Guerreiros</span>
+                </div>
+                <button type="button" class="studio-btn-cta retro-start-btn" onclick="appCore.retroNextSlide()">
+                    <span>REVELAR MOMENTOS</span>
+                    <span>→</span>
+                </button>
+            </div>
+
+            <!-- Slide 1: O Caos em Números -->
+            <div class="retro-slide" id="retro-slide-1">
+                <div class="retro-slide-category">REGISTRO DA GUERRA</div>
+                <h2 class="retro-slide-title">O Caos em Números</h2>
+                <div class="retro-stats-grid">
+                    <div class="retro-stat-card">
+                        <div class="retro-stat-icon">🎯</div>
+                        <div class="retro-stat-val" id="retro-stat-points">0</div>
+                        <div class="retro-stat-lbl">Pontos Disputados</div>
+                    </div>
+                    <div class="retro-stat-card">
+                        <div class="retro-stat-icon">⚡</div>
+                        <div class="retro-stat-val" id="retro-stat-rounds">0</div>
+                        <div class="retro-stat-lbl">Partidas Jogadas</div>
+                    </div>
+                    <div class="retro-stat-card">
+                        <div class="retro-stat-icon">🔥</div>
+                        <div class="retro-stat-val" id="retro-stat-streak">0</div>
+                        <div class="retro-stat-lbl">Maior Sequência</div>
+                    </div>
+                    <div class="retro-stat-card">
+                        <div class="retro-stat-icon">💣</div>
+                        <div class="retro-stat-val" id="retro-stat-bombs">0</div>
+                        <div class="retro-stat-lbl">Bombas & Falhas</div>
+                    </div>
+                </div>
+                <div class="retro-slide-punchline" id="retro-stat-punchline">"Nenhum participante saiu dessa mesa com a reputação 100% intacta."</div>
+            </div>
+
+            <!-- Slide 2: Saco de Pancadas -->
+            <div class="retro-slide" id="retro-slide-2">
+                <div class="retro-slide-category" style="color:var(--pop-magenta);">HALL DO DESASTRE</div>
+                <h2 class="retro-slide-title">Saco de Pancadas 💥</h2>
+                <div class="retro-award-card-wrap">
+                    <div class="retro-award-card card-25d" id="retro-card-saco">
+                        <div class="retro-card-stamp stamp-disaster">ALVO PREFERIDO</div>
+                        <div class="retro-card-avatar-box" id="retro-saco-avatar"></div>
+                        <div class="retro-card-name" id="retro-saco-name">Jogador</div>
+                        <div class="retro-card-meta" id="retro-saco-meta">0 penalidades sofridas</div>
+                    </div>
+                </div>
+                <p class="retro-slide-verdict" id="retro-saco-desc">Sofreu na pele a fúria e o azar da mesa, mas continuou de pé.</p>
+            </div>
+
+            <!-- Slide 3: Mestre do Blefe -->
+            <div class="retro-slide" id="retro-slide-3">
+                <div class="retro-slide-category" style="color:var(--pop-cyan);">HALL DA MALÍCIA</div>
+                <h2 class="retro-slide-title">Mestre do Blefe 🎭</h2>
+                <div class="retro-award-card-wrap">
+                    <div class="retro-award-card card-25d" id="retro-card-judas">
+                        <div class="retro-card-stamp stamp-traitor">TRAIDOR NATO</div>
+                        <div class="retro-card-avatar-box" id="retro-judas-avatar"></div>
+                        <div class="retro-card-name" id="retro-judas-name">Jogador</div>
+                        <div class="retro-card-meta" id="retro-judas-meta">0 vitórias de disfarce</div>
+                    </div>
+                </div>
+                <p class="retro-slide-verdict" id="retro-judas-desc">Mentiu, olhou no fundo dos olhos de todo mundo e ainda saiu sorrindo.</p>
+            </div>
+
+            <!-- Slide 4: Prata e Bronze -->
+            <div class="retro-slide" id="retro-slide-4">
+                <div class="retro-slide-category" style="color:var(--pop-purple);">QUASE NO TOPO</div>
+                <h2 class="retro-slide-title">Honra e Glória 🥈🥉</h2>
+                <div class="retro-podium-duo">
+                    <div class="retro-runner-card bronze-card" id="retro-card-bronze">
+                        <div class="retro-runner-medal">🥉 3º LUGAR</div>
+                        <div class="retro-runner-avatar-box" id="retro-bronze-avatar"></div>
+                        <div class="retro-runner-name" id="retro-bronze-name">Jogador</div>
+                        <div class="retro-runner-pts" id="retro-bronze-pts">0 Pts</div>
+                    </div>
+                    <div class="retro-runner-card silver-card" id="retro-card-silver">
+                        <div class="retro-runner-medal">🥈 2º LUGAR</div>
+                        <div class="retro-runner-avatar-box" id="retro-silver-avatar"></div>
+                        <div class="retro-runner-name" id="retro-silver-name">Jogador</div>
+                        <div class="retro-runner-pts" id="retro-silver-pts">0 Pts</div>
+                    </div>
+                </div>
+                <p class="retro-slide-verdict">Lutaram até o último segundo, mas faltou um triz para a coroa!</p>
+            </div>
+
+            <!-- Slide 5: Campeão Supremo -->
+            <div class="retro-slide" id="retro-slide-5">
+                <div class="retro-spotlight-beam"></div>
+                <div class="retro-slide-category" style="color:var(--pop-yellow);">O GRANDE VENCEDOR</div>
+                <h2 class="retro-slide-title">Campeão Supremo 👑</h2>
+                <div class="retro-champion-box">
+                    <div class="retro-crown-floating" id="retro-crown-icon">👑</div>
+                    <div class="retro-champ-card-wrap">
+                        <div class="retro-champ-card card-25d" id="retro-card-champ">
+                            <div class="retro-champ-badge-gold">INDISCUTÍVEL</div>
+                            <div class="retro-champ-avatar-box" id="retro-champ-avatar"></div>
+                            <div class="retro-champ-name" id="retro-champ-name">Jogador</div>
+                            <div class="retro-champ-pts" id="retro-champ-pts">0 PONTOS</div>
+                        </div>
+                    </div>
+                </div>
+                <p class="retro-slide-verdict" id="retro-champ-verdict">Incontestável! Ditou o ritmo dos jogos e subiu soberano ao topo do pódio!</p>
+            </div>
+
+            <!-- Slide 6: Painel Resumo Executivo -->
+            <div class="retro-slide" id="retro-slide-6">
+                <div class="retro-slide-category">ENCERRAMENTO OFICIAL</div>
+                <h2 class="retro-slide-title">A Mesa está Encerrada 🏁</h2>
+                
+                <!-- Resumo Consolidado Grid -->
+                <div class="retro-summary-card">
+                    <div class="retro-summary-header">
+                        <div class="retro-summary-champ-chip">
+                            <span class="champ-crown-mini">👑</span>
+                            <span id="retro-sum-champ-name">Campeão</span>
+                            <span class="badge-pts" id="retro-sum-champ-pts">0 Pts</span>
+                        </div>
+                    </div>
+                    <div class="retro-summary-runners-row" id="retro-summary-runners-row">
+                        <!-- Injetado via JS -->
+                    </div>
+                </div>
+
+                <!-- Botões de Ação Final (SaaS de Estúdio) -->
+                <div class="retro-actions-stack">
+                    <button type="button" class="btn btn-warning" onclick="appCore.verPosterInApp()">
+                        📸 VER PÔSTER DA VITÓRIA
+                    </button>
+                    <button type="button" class="btn btn-primary" onclick="appCore.retroReplay()">
+                        🔄 REVER RETROSPECTIVA
+                    </button>
+                    <button type="button" class="btn btn-danger" onclick="appCore.confirmarNovaNoite()">
+                        🔄 NOVA NOITE (RESETAR PONTOS)
+                    </button>
+                    <button type="button" class="btn btn-dark" onclick="appCore.retroClose()">
+                        🏠 VOLTAR AO MENU PRINCIPAL
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Indicador de Navegação por Toque na base -->
+        <div class="retro-footer-cue">
+            <span>Toque nas laterais para avançar ou voltar</span>
+        </div>
+    </div>
     
     <!-- Modal Oficial: Como Jogar / Guia Rápido -->
     <div id="rules-modal" class="modal">
-        <div class="modal-content" style="max-width: 460px; padding: 22px 18px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:2px solid var(--ink-dark); padding-bottom:10px;">
+        <div class="modal-content" style="max-width: 420px; padding: 20px 18px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:10px;">
                 <div style="display:flex; align-items:center; gap:10px;">
-                    <span id="rm-icon" style="font-size:2.2em;">🎮</span>
+                    <span id="rm-icon" style="font-size:2em;">🎮</span>
                     <div>
-                        <h2 id="rm-title" style="margin:0; font-size:1.35em; color:var(--ink-white); line-height:1.1;">Como Jogar</h2>
-                        <span id="rm-badge" style="display:inline-block; margin-top:3px; font-size:0.7em; background:var(--pop-cyan); color:#000; font-weight:900; padding:2px 8px; border-radius:12px;">Mín 3 Jogadores</span>
+                        <h2 id="rm-title" style="margin:0; font-size:1.25em; color:var(--ink-white); font-weight:800;">Como Jogar</h2>
+                        <span id="rm-badge" style="display:inline-block; margin-top:2px; font-size:0.7em; background:rgba(6, 182, 212, 0.2); color:var(--pop-cyan); font-weight:800; padding:2px 8px; border-radius:12px; border:1px solid rgba(6, 182, 212, 0.3);">Mín 3 Jogadores</span>
                     </div>
                 </div>
-                <button class="nav-icon-btn" onclick="appCore.closeModal('rules-modal')" style="width:36px; height:36px; font-size:1em;" title="Fechar">✕</button>
+                <button class="nav-icon-btn" onclick="appCore.closeModal('rules-modal')" style="width:34px; height:34px; font-size:0.9em;" title="Fechar">✕</button>
             </div>
 
-            <p id="rm-tagline" style="font-size:0.92em; color:var(--pop-yellow); font-weight:900; margin:0 0 14px 0; line-height:1.3; font-style:italic;"></p>
+            <p id="rm-tagline" style="font-size:0.88em; color:var(--pop-yellow); font-weight:700; margin:0 0 12px 0; line-height:1.35;"></p>
 
-            <div id="rm-steps-container" style="display:flex; flex-direction:column; gap:8px; margin-bottom:14px;">
+            <div id="rm-steps-container" style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
                 <!-- Passos injetados via JS -->
             </div>
 
-            <div id="rm-golden-box" style="background:rgba(255, 230, 0, 0.08); border:1.5px solid var(--pop-yellow); border-radius:14px; padding:10px 12px; margin-bottom:12px;">
-                <div style="color:var(--pop-yellow); font-weight:900; font-size:0.82em; display:flex; align-items:center; gap:6px;">
-                    <span>⚠️</span> <span>REGRA DE OURO / DICA DE MESTRE</span>
-                </div>
-                <div id="rm-golden-text" style="color:var(--ink-white); font-size:0.8em; font-weight:700; margin-top:4px; line-height:1.35;"></div>
-            </div>
-
-            <div id="rm-roles-box" style="display:none; background:rgba(255, 0, 85, 0.08); border:1.5px dashed var(--pop-magenta); border-radius:14px; padding:10px 12px; margin-bottom:14px;">
-                <div style="color:var(--pop-magenta); font-weight:900; font-size:0.82em; display:flex; align-items:center; gap:6px;">
-                    <span>🎭</span> <span id="rm-roles-title">PAPÉIS SECRETOS EXTRAS</span>
-                </div>
-                <div id="rm-roles-text" style="color:var(--ink-white); font-size:0.8em; font-weight:700; margin-top:4px; line-height:1.35;"></div>
-            </div>
-
-            <button class="btn btn-primary" onclick="appCore.closeModal('rules-modal')" style="font-size:1.05em; padding:12px; width:100%;">ENTENDI, BORA JOGAR! 🚀</button>
+            <button class="btn btn-primary" onclick="appCore.closeModal('rules-modal')" style="font-size:0.98em; padding:12px; width:100%;">BORA JOGAR! ➔</button>
         </div>
     </div>
 
@@ -426,7 +738,7 @@
         <div class="modal-content" style="max-width: 440px; text-align: center; padding: 22px 18px;">
             <div id="psm-icon" style="font-size: 2.8em; margin-bottom: 6px;">🎯</div>
             <h2 id="psm-title" style="margin: 0 0 6px 0; font-size: 1.3em; color: var(--pop-yellow);">Quem Adivinhou?</h2>
-            <p id="psm-subtitle" style="font-size: 0.82em; color: var(--ink-muted); margin: 0 0 16px 0; font-weight: 800;">Toque no guerreiro correspondente:</p>
+            <p id="psm-subtitle" style="font-size: 0.82em; color: var(--ink-muted); margin: 0 0 16px 0; font-weight: 800;">Toque no jogador correspondente:</p>
             <div id="psm-cards-grid" style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; max-height: 280px; overflow-y: auto; padding: 4px;"></div>
             <button id="psm-cancel-btn" class="btn btn-dark" style="margin-top: 14px; display: none;" onclick="appCore.closeModal('player-select-modal')">Cancelar</button>
         </div>
@@ -503,38 +815,38 @@
         </div>
     </div>
     
-    <!-- Modal de Temas -->
-    <div id="themes-modal" class="modal">
-        <div class="modal-content">
-            <h2 style="text-align:center; color:var(--pop-cyan); margin:0 0 8px 0;">Escolher Temas</h2>
-            <p style="color:var(--ink-muted); font-size:0.9em; text-align:center; margin-bottom:12px; font-weight:800;">Selecione os temas da partida:</p>
-            <div id="themes-modal-container" style="display:flex; flex-wrap:wrap; gap:8px; max-height:240px; overflow-y:auto;"></div>
-            <button class="btn btn-primary" style="margin-top:16px;" onclick="appCore.closeModal('themes-modal')">Confirmar Temas</button>
+    <!-- Modal de Ajustes do Lobby -->
+    <div id="lobby-settings-modal" class="modal">
+        <div class="modal-content" style="max-width: 400px; padding: 20px 18px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                <h3 style="margin:0; font-weight:900; color:#fff; font-size:1.25rem;">⚙️ Ajustes da Rodada</h3>
+                <button type="button" class="nav-icon-btn" onclick="appCore.closeModal('lobby-settings-modal')" style="width:34px; height:34px; font-size:0.9rem;">✕</button>
+            </div>
+            
+            <div id="game-specific-configs" style="display:flex; flex-direction:column; gap:12px; margin-bottom:18px;"></div>
+
+            <button class="studio-btn-cta" onclick="appCore.closeModal('lobby-settings-modal')">
+                <span>CONFIRMAR AJUSTES</span>
+                <span style="font-size:1.15em;">✓</span>
+            </button>
         </div>
     </div>
 
-    <!-- Loja Negra Funcional -->
-    <div id="store-modal" class="modal">
-        <div class="modal-content">
-            <h2 style="text-align:center; color:var(--pop-yellow); margin:0 0 4px 0;">🛒 Loja Negra</h2>
-            <p id="store-team-info" style="color:white; font-weight:900; text-align:center; margin-bottom:16px;">Saldo da Equipe: 0 Pts</p>
-            
-            <div style="background:var(--bg-surface-elevated); border:var(--border-brutal-sm); box-shadow:var(--shadow-brutal-sm); padding:12px 14px; border-radius:16px; display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; cursor:pointer;" onclick="minigames.buySabotage('mordaca', 30)">
-                <div><div style="font-weight:900; color:var(--pop-magenta); font-size:1.1em;">💥 Mordaça</div><div style="font-size:0.8em; color:var(--ink-muted);">Eles devem cantar as dicas.</div></div>
-                <div style="background:var(--pop-magenta); color:white; padding:6px 12px; border-radius:10px; font-weight:900;" id="store-cost-mordaca">-30 Pts</div>
+    <!-- Modal de Temas -->
+    <div id="themes-modal" class="modal">
+        <div class="modal-content" style="max-width: 380px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <h3 style="margin:0; font-weight:900; color:#fff; font-size:1.25rem;">🏷️ Temas da Partida</h3>
+                <button type="button" class="nav-icon-btn" onclick="appCore.closeModal('themes-modal')" style="width:32px; height:32px; font-size:0.9rem;">✕</button>
             </div>
-
-            <div style="background:var(--bg-surface-elevated); border:var(--border-brutal-sm); box-shadow:var(--shadow-brutal-sm); padding:12px 14px; border-radius:16px; display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; cursor:pointer;" onclick="minigames.buySabotage('tempo', 40)">
-                <div><div style="font-weight:900; color:var(--pop-cyan); font-size:1.1em;">⏳ Cleptomania</div><div style="font-size:0.8em; color:var(--ink-muted);">Rouba 10s do relógio deles.</div></div>
-                <div style="background:var(--pop-cyan); color:var(--ink-black); padding:6px 12px; border-radius:10px; font-weight:900;" id="store-cost-tempo">-40 Pts</div>
+            <p style="color:var(--ink-muted); font-size:0.85rem; margin:0 0 14px 0; font-weight:700;">Toque nos temas para ativar ou desativar na partida:</p>
+            <div id="themes-modal-container"></div>
+            <div style="margin-top: 18px;">
+                <button class="studio-btn-cta" onclick="appCore.closeModal('themes-modal')">
+                    <span>SALVAR TEMAS</span>
+                    <span style="font-size:1.15em;">✓</span>
+                </button>
             </div>
-
-            <div id="store-item-voz" style="background:var(--bg-surface-elevated); border:var(--border-brutal-sm); box-shadow:var(--shadow-brutal-sm); padding:12px 14px; border-radius:16px; display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; cursor:pointer;" onclick="minigames.buySabotage('voz', 50)">
-                <div><div style="font-weight:900; color:var(--pop-green); font-size:1.1em;">🗣️ Desbloquear Voz</div><div style="font-size:0.8em; color:var(--ink-muted);">Permite 1 palavra na Mímica.</div></div>
-                <div style="background:var(--pop-green); color:var(--ink-black); padding:6px 12px; border-radius:10px; font-weight:900;" id="store-cost-voz">-50 Pts</div>
-            </div>
-
-            <button class="btn btn-dark" onclick="appCore.closeModal('store-modal')">Voltar à Arena</button>
         </div>
     </div>
 
@@ -582,9 +894,14 @@
         </div>
     </div>
 
-    <!-- Scripts do Motor Refeito -->
-    <script src="core.js"></script>
-    <script src="minigames.js"></script>
-    <script src="debug.js"></script>
+    <!-- Scripts com Cache-Buster Automático (Sempre atualizados) -->
+    <script>
+        document.write('<script src="core.js?v=' + (window.__ASSET_VERSION__ || Date.now()) + '"><\/script>');
+        document.write('<script src="minigames.js?v=' + (window.__ASSET_VERSION__ || Date.now()) + '"><\/script>');
+    </script>
+    <noscript>
+        <script src="core.js"></script>
+        <script src="minigames.js"></script>
+    </noscript>
 </body>
 </html>
